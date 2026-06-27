@@ -397,8 +397,9 @@ export default function BaoCao({ currentUser }) {
             ))}
           </div>
 
-          <div className="row-2col" style={{ marginTop: 16 }}>
-            <button className="btn-secondary" onClick={closeDetail} disabled={saving}>
+          <div className={editMode || canEdit ? 'row-2col' : ''} style={{ marginTop: 16 }}>
+            <button className="btn-secondary" onClick={closeDetail} disabled={saving}
+              style={!editMode && !canEdit ? { width: '100%' } : {}}>
               {editMode ? 'Hủy' : 'Đóng'}
             </button>
             {editMode ? (
