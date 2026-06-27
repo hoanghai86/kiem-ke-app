@@ -300,7 +300,7 @@ export default function BatDauPhien({ currentUser }) {
     const isEdit = mode === 'edit'
     return (
       <div className="screen">
-        <div className="topbar">
+        <div className="topbar" style={{ minHeight: 72 }}>
           <div className="topbar-title">{isEdit ? 'Sửa phiên kiểm kê' : 'Tạo phiên mới'}</div>
         </div>
 
