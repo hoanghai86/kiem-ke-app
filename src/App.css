@@ -325,9 +325,9 @@ body {
 }
 
 .dc-btn {
-  flex: 1; padding: 9px 4px;
+  flex: 1; padding: 14px 4px;
   border: none; background: none;
-  font-size: 13px; font-weight: 500; cursor: pointer;
+  font-size: 14px; font-weight: 500; cursor: pointer;
 }
 .dc-btn + .dc-btn { border-left: 1px solid var(--border); }
 
