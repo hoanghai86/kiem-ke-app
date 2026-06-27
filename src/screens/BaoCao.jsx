@@ -10,7 +10,7 @@ const TABS = [
   { key: 'ton_kho',   label: 'Tồn kho SS' },
 ]
 
-async function downloadCSV(rows, cols, filename) {
+function buildCSVBlob(rows, cols, filename) {
   const header = cols.map(c => c.label).join(',')
   const body = rows.map((r, i) =>
     cols.map(c => {
@@ -20,25 +20,26 @@ async function downloadCSV(rows, cols, filename) {
     }).join(',')
   ).join('\n')
   const blob = new Blob(['﻿' + header + '\n' + body], { type: 'text/csv;charset=utf-8' })
-  const file = new File([blob], filename, { type: 'text/csv' })
+  return { blob, file: new File([blob], filename, { type: 'text/csv' }) }
+}
 
-  // Thử Web Share API (mobile: mở share sheet Zalo/Drive/...)
-  if (navigator.share) {
-    try {
-      await navigator.share({ files: [file], title: filename })
-      return
-    } catch (err) {
-      if (err.name === 'AbortError') return // user bấm huỷ
-      // Không share được file → fallback download
-    }
-  }
-
-  // Fallback: download (desktop hoặc browser không hỗ trợ share file)
+function exportCSV(rows, cols, filename) {
+  const { blob } = buildCSVBlob(rows, cols, filename)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename
   document.body.appendChild(a); a.click()
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url) }, 1000)
+}
+
+async function shareCSV(rows, cols, filename) {
+  const { file } = buildCSVBlob(rows, cols, filename)
+  if (!navigator.share) { alert('Trình duyệt không hỗ trợ chia sẻ file'); return }
+  try {
+    await navigator.share({ files: [file], title: filename })
+  } catch (err) {
+    if (err.name !== 'AbortError') alert('Không chia sẻ được: ' + err.message)
+  }
 }
 
 const getToday = () => {
@@ -589,19 +590,35 @@ export default function BaoCao({ currentUser }) {
       {tab !== 'so_sanh' && (
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           {tab === 'ton_kho' ? (
-            <button className="btn-secondary"
-              onClick={() => downloadCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
-              disabled={!displayTonKho.length}
-              style={{ width: '100%', fontSize: 13 }}>
-              ⬆ Xuất / Chia sẻ CSV ({displayTonKho.length} dòng)
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-secondary"
+                onClick={() => exportCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
+                disabled={!displayTonKho.length}
+                style={{ flex: 1, fontSize: 13 }}>
+                ⬇ Xuất CSV ({displayTonKho.length})
+              </button>
+              <button className="btn-secondary"
+                onClick={() => shareCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
+                disabled={!displayTonKho.length}
+                style={{ flex: 1, fontSize: 13 }}>
+                ⬆ Chia sẻ
+              </button>
+            </div>
           ) : (
-            <button className="btn-secondary"
-              onClick={() => downloadCSV(displayData, cols, filename)}
-              disabled={!displayData.length}
-              style={{ width: '100%', fontSize: 13 }}>
-              ⬆ Xuất / Chia sẻ CSV ({displayData.length} dòng)
-            </button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-secondary"
+                onClick={() => exportCSV(displayData, cols, filename)}
+                disabled={!displayData.length}
+                style={{ flex: 1, fontSize: 13 }}>
+                ⬇ Xuất CSV ({displayData.length})
+              </button>
+              <button className="btn-secondary"
+                onClick={() => shareCSV(displayData, cols, filename)}
+                disabled={!displayData.length}
+                style={{ flex: 1, fontSize: 13 }}>
+                ⬆ Chia sẻ
+              </button>
+            </div>
           )}
         </div>
       )}

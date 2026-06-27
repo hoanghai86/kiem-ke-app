@@ -54,9 +54,10 @@ create table ton_kho (
 );
 
 -- 6. PHIÊN KIỂM KÊ
+-- ma_kho nullable: một phiên có thể kiểm nhiều kho (kho được ghi ở từng dòng chitiet)
 create table phien_kiem_ke (
   id uuid primary key default gen_random_uuid(),
-  ma_kho text not null references dm_kho(ma_kho),
+  ma_kho text references dm_kho(ma_kho),            -- nullable, chỉ dùng cho dữ liệu cũ
   ke_toan_id uuid not null references dm_user(id),
   thu_kho_id uuid not null references dm_user(id),
   ngay_kiem date not null default current_date,
@@ -72,6 +73,7 @@ create table kiem_ke_chitiet (
   phien_id uuid not null references phien_kiem_ke(id) on delete cascade,
   ma_vt text not null references dm_vat_tu(ma_vt),
   ten_vt text not null,
+  ma_kho text references dm_kho(ma_kho),  -- kho được kiểm tại dòng này
   ma_dvt_kiem text,                        -- dvt người kiểm chọn
   he_so_quy_doi numeric(10,4) default 1,   -- hệ số quy đổi sang dvt chính
   luot_kiem integer not null default 1,
@@ -184,3 +186,13 @@ create policy "user_own_chitiet" on kiem_ke_chitiet
 alter table phien_kiem_ke
   add column if not exists xac_nhan_ke_toan boolean default false,
   add column if not exists xac_nhan_thu_kho boolean default false;
+
+-- =============================================
+-- MIGRATION: Kho chuyển từ phiên xuống chitiet
+-- Chạy trong Supabase SQL Editor
+-- =============================================
+alter table phien_kiem_ke
+  alter column ma_kho drop not null;
+
+alter table kiem_ke_chitiet
+  add column if not exists ma_kho text references dm_kho(ma_kho);
