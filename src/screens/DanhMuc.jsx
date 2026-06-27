@@ -328,10 +328,10 @@ export default function DanhMuc({ inline = false }) {
         </button>
         <div className="row-2col" style={{ marginBottom: 10 }}>
           <button className="btn-secondary" onClick={handleExport} disabled={!list.length}>
-            ⬇ Export CSV
+            ⬇ Export
           </button>
           <button className="btn-secondary" onClick={() => importRef.current?.click()} disabled={importing}>
-            {importing ? 'Đang import...' : '⬆ Import CSV'}
+            {importing ? 'Đang import...' : '⬆ Import'}
           </button>
         </div>
         <input ref={importRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImport} />
