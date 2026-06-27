@@ -41,7 +41,10 @@ async function downloadCSV(rows, cols, filename) {
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url) }, 1000)
 }
 
-const getToday = () => new Date().toISOString().slice(0, 10)
+const getToday = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
 
 const INIT_FILTERS = () => ({
   tuNgay: getToday(), denNgay: getToday(),

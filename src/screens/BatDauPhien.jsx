@@ -4,7 +4,9 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { db, createPhienLocal, updatePhienLocal, deletePhienLocal } from '../lib/db'
 import { supabase } from '../lib/supabase'
 
-const TODAY = new Date().toISOString().slice(0, 10)
+const toLocalDate = (d = new Date()) =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+const TODAY = toLocalDate()
 
 export default function BatDauPhien({ currentUser }) {
   const navigate = useNavigate()
