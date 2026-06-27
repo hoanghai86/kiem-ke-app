@@ -1,5 +1,5 @@
 // src/screens/DanhMuc.jsx
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { pullDanhMuc } from '../lib/sync'
@@ -26,7 +26,30 @@ export default function DanhMuc({ inline = false }) {
   const [saving, setSaving]     = useState(false)
   const [err, setErr]           = useState('')
   const [deletingId, setDeletingId] = useState(null)
-  const [dvtOptions, setDvtOptions] = useState([]) // cho dropdown vật tư
+  const [dvtOptions, setDvtOptions] = useState([])
+  const [importing, setImporting]   = useState(false)
+  const importRef = useRef(null)
+
+  const TAB_CFG = {
+    kho: {
+      table: 'dm_kho', key: 'ma_kho',
+      headers: ['ma_kho', 'ten_kho', 'active'],
+      getRow: r => [r.ma_kho, r.ten_kho, r.active ? '1' : '0'],
+      toPayload: cols => ({ ma_kho: cols[0]?.trim().toUpperCase(), ten_kho: cols[1]?.trim(), active: !['0','false',''].includes((cols[2]||'1').trim().toLowerCase()) }),
+    },
+    dvt: {
+      table: 'dm_dvt', key: 'ma_dvt',
+      headers: ['ma_dvt', 'ten_dvt', 'active'],
+      getRow: r => [r.ma_dvt, r.ten_dvt, r.active ? '1' : '0'],
+      toPayload: cols => ({ ma_dvt: cols[0]?.trim().toUpperCase(), ten_dvt: cols[1]?.trim(), active: !['0','false',''].includes((cols[2]||'1').trim().toLowerCase()) }),
+    },
+    vat_tu: {
+      table: 'dm_vat_tu', key: 'ma_vt',
+      headers: ['ma_vt', 'ten_vt', 'ma_dvt_chinh', 'active'],
+      getRow: r => [r.ma_vt, r.ten_vt, r.ma_dvt_chinh || '', r.active ? '1' : '0'],
+      toPayload: cols => ({ ma_vt: cols[0]?.trim().toUpperCase(), ten_vt: cols[1]?.trim(), ma_dvt_chinh: cols[2]?.trim() || null, active: !['0','false',''].includes((cols[3]||'1').trim().toLowerCase()) }),
+    },
+  }
 
   useEffect(() => { loadList(); setSearch(''); closeForm() }, [tab])
   useEffect(() => { if (tab === 'vat_tu') loadDvtOptions() }, [tab])
@@ -131,6 +154,59 @@ export default function DanhMuc({ inline = false }) {
     const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
     await supabase.from(tableMap[tab]).update({ active: !item.active }).eq('id', item.id)
     setList(prev => prev.map(r => r.id === item.id ? { ...r, active: !item.active } : r))
+  }
+
+  function parseCSVLine(line) {
+    const result = []; let cur = ''; let inQ = false
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++ } else inQ = !inQ }
+      else if (line[i] === ',' && !inQ) { result.push(cur); cur = '' }
+      else cur += line[i]
+    }
+    result.push(cur); return result
+  }
+
+  async function handleExport() {
+    const cfg = TAB_CFG[tab]
+    const csvRows = list.map(r => cfg.getRow(r).map(v => {
+      const s = String(v ?? '')
+      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g,'""')}"` : s
+    }).join(','))
+    const csv = '﻿' + [cfg.headers.join(','), ...csvRows].join('\n')
+    const toLocalDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+    const filename = `DanhMuc_${tab}_${toLocalDate()}.csv`
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const file = new File([blob], filename, { type: 'text/csv' })
+    if (navigator.share) {
+      try { await navigator.share({ files: [file], title: filename }); return }
+      catch (e) { if (e.name === 'AbortError') return }
+    }
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename
+    document.body.appendChild(a); a.click()
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url) }, 1000)
+  }
+
+  async function handleImport(e) {
+    const file = e.target.files?.[0]; if (!file) return
+    e.target.value = ''
+    const text = (await file.text()).replace(/^﻿/, '')
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+    if (lines.length < 2) { setErr('File CSV không có dữ liệu'); return }
+    const cfg = TAB_CFG[tab]
+    const payloads = lines.slice(1)
+      .map(l => parseCSVLine(l))
+      .filter(cols => cols[0]?.trim())
+      .map(cols => cfg.toPayload(cols))
+    if (!payloads.length) { setErr('Không có dòng hợp lệ'); return }
+    setImporting(true); setErr('')
+    try {
+      const { error } = await supabase.from(cfg.table).upsert(payloads, { onConflict: cfg.key })
+      if (error) throw new Error(error.message)
+      await loadList(); await pullDanhMuc()
+    } catch (e) { setErr('Import lỗi: ' + e.message) }
+    finally { setImporting(false) }
   }
 
   // Lọc danh sách theo search
@@ -266,9 +342,18 @@ export default function DanhMuc({ inline = false }) {
       <div className="content">
         {err && <div className="error-box" onClick={() => setErr('')}>{err} ✕</div>}
 
-        <button className="btn-primary" onClick={openCreate} style={{ width: '100%', marginBottom: 10 }}>
+        <button className="btn-primary" onClick={openCreate} style={{ width: '100%', marginBottom: 8 }}>
           + Thêm {countLabel[tab]}
         </button>
+        <div className="row-2col" style={{ marginBottom: 10 }}>
+          <button className="btn-secondary" onClick={handleExport} disabled={!list.length}>
+            ⬇ Export CSV
+          </button>
+          <button className="btn-secondary" onClick={() => importRef.current?.click()} disabled={importing}>
+            {importing ? 'Đang import...' : '⬆ Import CSV'}
+          </button>
+        </div>
+        <input ref={importRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleImport} />
 
         <input className="input-field" placeholder="Tìm kiếm..." value={search}
           onChange={e => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
