@@ -5,8 +5,9 @@ import { pushOfflineQueue } from '../lib/sync'
 
 const TABS = [
   { key: 'kiem_ke',    label: 'Kiểm kê' },
-  { key: 'thua_thieu', label: 'Thừa/Thiếu so với SS' },
+  { key: 'thua_thieu', label: 'Thừa/Thiếu SS' },
   { key: 'so_sanh',   label: 'So sánh KT/TK' },
+  { key: 'ton_kho',   label: 'Tồn kho SS' },
 ]
 
 function downloadCSV(rows, cols, filename) {
@@ -43,6 +44,9 @@ export default function BaoCao() {
   const [dvtMap, setDvtMap]       = useState({})
   const [danhMucDvt, setDanhMucDvt] = useState([])
   const [vtDvtChinhMap, setVtDvtChinhMap] = useState({})
+  const [vtNameMap, setVtNameMap]   = useState({})
+  const [tonKhoRows, setTonKhoRows] = useState([])
+  const [loadingTonKho, setLoadingTonKho] = useState(false)
   const [data, setData]           = useState([])
   const [loading, setLoading]     = useState(false)
   const [showFilters, setShowFilters] = useState(false)
@@ -65,10 +69,19 @@ export default function BaoCao() {
     { label: 'SL quy đổi', get: r => r.so_luong_quy_doi ?? '' },
     { label: 'ĐVT chính',  get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
     { label: 'Ghi chú',    get: r => r.ghi_chu || '' },
-    { label: 'Kho',        get: r => r.phien_kiem_ke?.dm_kho?.ten_kho || r.phien_kiem_ke?.ma_kho || '' },
+    { label: 'Kho',        get: r => r.dm_kho?.ten_kho || r.ma_kho || r.phien_kiem_ke?.dm_kho?.ten_kho || r.phien_kiem_ke?.ma_kho || '' },
     { label: 'Tên TK',     get: r => r._nguoi_nhap || '' },
     { label: 'Phiên',      get: r => r.phien_id ? '#' + r.phien_id.slice(-4).toUpperCase() : '' },
     { label: 'Thời gian',  get: r => r.created_at ? new Date(r.created_at).toLocaleString('vi-VN') : '' },
+  ]
+
+  const colTonKho = [
+    { label: 'Stt',        get: (r, i) => i + 1 },
+    { label: 'Mã VT',      get: r => r.ma_vt },
+    { label: 'Tên VT',     get: r => vtNameMap[r.ma_vt] || '' },
+    { label: 'ĐVT chính',  get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
+    { label: 'SL sổ sách', get: r => r.so_luong_so_sach ?? '' },
+    { label: 'Kho',        get: r => khoList.find(k => k.ma_kho === r.ma_kho)?.ten_kho || r.ma_kho || '' },
   ]
 
   const colThuaThieu = [
@@ -98,11 +111,15 @@ export default function BaoCao() {
         setDvtMap(map)
         setDanhMucDvt(data || [])
       })
-    supabase.from('dm_vat_tu').select('ma_vt,ma_dvt_chinh').eq('active', true)
+    supabase.from('dm_vat_tu').select('ma_vt,ten_vt,ma_dvt_chinh').eq('active', true)
       .then(({ data }) => {
-        const map = {}
-        ;(data || []).forEach(v => { if (v.ma_dvt_chinh) map[v.ma_vt] = v.ma_dvt_chinh })
-        setVtDvtChinhMap(map)
+        const mapDvt = {}, mapName = {}
+        ;(data || []).forEach(v => {
+          if (v.ma_dvt_chinh) mapDvt[v.ma_vt] = v.ma_dvt_chinh
+          mapName[v.ma_vt] = v.ten_vt || ''
+        })
+        setVtDvtChinhMap(mapDvt)
+        setVtNameMap(mapName)
       })
   }, [])
 
@@ -121,14 +138,14 @@ export default function BaoCao() {
     try {
       let q = supabase
         .from('kiem_ke_chitiet')
-        .select('id,phien_id,ma_vt,ten_vt,ma_dvt_kiem,he_so_quy_doi,so_luong_thuc_te,so_luong_quy_doi,so_luong_so_sach,chenh_lech,ghi_chu,created_at,nguoi_nhap_id,phien_kiem_ke!inner(id,ma_kho,ngay_kiem,ke_toan_id,thu_kho_id,xac_nhan_ke_toan,xac_nhan_thu_kho,dm_kho(ten_kho))')
+        .select('id,phien_id,ma_vt,ten_vt,ma_kho,dm_kho(ten_kho),ma_dvt_kiem,he_so_quy_doi,so_luong_thuc_te,so_luong_quy_doi,so_luong_so_sach,chenh_lech,ghi_chu,created_at,nguoi_nhap_id,phien_kiem_ke!inner(id,ma_kho,ngay_kiem,ke_toan_id,thu_kho_id,xac_nhan_ke_toan,xac_nhan_thu_kho,dm_kho(ten_kho))')
         .order('created_at', { ascending: false })
 
       if (f.phien !== 'all') {
         q = q.eq('phien_kiem_ke.id', f.phien)
       } else {
         q = q.gte('phien_kiem_ke.ngay_kiem', f.tuNgay).lte('phien_kiem_ke.ngay_kiem', f.denNgay)
-        if (f.kho !== 'all')    q = q.eq('phien_kiem_ke.ma_kho', f.kho)
+        if (f.kho !== 'all')    q = q.eq('ma_kho', f.kho)
         if (f.keToan !== 'all') q = q.eq('phien_kiem_ke.ke_toan_id', f.keToan)
         if (f.thuKho !== 'all') q = q.eq('phien_kiem_ke.thu_kho_id', f.thuKho)
       }
@@ -149,6 +166,22 @@ export default function BaoCao() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  const loadTonKho = useCallback(async () => {
+    setLoadingTonKho(true)
+    try {
+      let q = supabase.from('ton_kho').select('ma_vt,ma_kho,so_luong_so_sach').order('ma_kho').order('ma_vt')
+      if (f.kho !== 'all') q = q.eq('ma_kho', f.kho)
+      const { data: rows } = await q
+      setTonKhoRows(rows || [])
+    } finally {
+      setLoadingTonKho(false)
+    }
+  }, [f.kho])
+
+  useEffect(() => { if (tab === 'ton_kho') loadTonKho() }, [tab, loadTonKho])
+
+  const khoMap = Object.fromEntries(khoList.map(k => [k.ma_kho, k.ten_kho]))
+
   // loaiDuLieu filter — client-side
   const afterRole = data.filter(r => {
     const p = r.phien_kiem_ke
@@ -163,6 +196,11 @@ export default function BaoCao() {
     ? afterRole.filter(r => r.ma_vt?.toLowerCase().includes(kw) || r.ten_vt?.toLowerCase().includes(kw))
     : afterRole
 
+  const kwTonKho = f.vatTu.trim().toLowerCase()
+  const displayTonKho = kwTonKho
+    ? tonKhoRows.filter(r => r.ma_vt.toLowerCase().includes(kwTonKho) || (vtNameMap[r.ma_vt] || '').toLowerCase().includes(kwTonKho))
+    : tonKhoRows
+
   // So sánh KT vs TK
   const soSanhRows = (() => {
     if (tab !== 'so_sanh') return []
@@ -174,7 +212,7 @@ export default function BaoCao() {
       if (!map[key]) {
         map[key] = {
           ma_vt: r.ma_vt, ten_vt: r.ten_vt, ma_dvt: r.ma_dvt_kiem,
-          kho: p.dm_kho?.ten_kho || p.ma_kho,
+          kho: r.dm_kho?.ten_kho || r.ma_kho || p.dm_kho?.ten_kho || p.ma_kho,
           phien: '#' + (r.phien_id?.slice(-4).toUpperCase() || ''),
           sl_kt: null, sl_tk: null,
         }
@@ -258,7 +296,7 @@ export default function BaoCao() {
         <div className="topbar">
           <div className="topbar-title">{detailItem.ma_vt} · {detailItem.ten_vt}</div>
           <div className="topbar-sub">
-            {editMode ? 'Chỉnh sửa' : 'Chi tiết'} · {p?.dm_kho?.ten_kho || p?.ma_kho || ''}
+            {editMode ? 'Chỉnh sửa' : 'Chi tiết'} · {detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || ''}
           </div>
         </div>
         <div className="content" style={{ overflowY: 'auto', flex: 1 }}>
@@ -328,7 +366,7 @@ export default function BaoCao() {
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {[
-              ['Kho',        p?.dm_kho?.ten_kho || p?.ma_kho || '—'],
+              ['Kho',        detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || '—'],
               ['Người nhập', detailItem._nguoi_nhap || '—'],
               ['Phiên',      detailItem.phien_id ? '#' + detailItem.phien_id.slice(-4).toUpperCase() : '—'],
               ['Thời gian',  detailItem.created_at ? new Date(detailItem.created_at).toLocaleString('vi-VN') : '—'],
@@ -380,14 +418,16 @@ export default function BaoCao() {
   const thuKhoList   = Object.values(userMap).filter(u => u.role === 'thu_kho')
 
   const todayStr = getToday()
-  const activeFilterCount = [
-    f.tuNgay !== todayStr || f.denNgay !== todayStr,
-    f.kho !== 'all', f.phien !== 'all', f.keToan !== 'all', f.thuKho !== 'all', f.vatTu.trim()
-  ].filter(Boolean).length
+  const activeFilterCount = tab === 'ton_kho'
+    ? [f.kho !== 'all', f.vatTu.trim()].filter(Boolean).length
+    : [
+        f.tuNgay !== todayStr || f.denNgay !== todayStr,
+        f.kho !== 'all', f.phien !== 'all', f.keToan !== 'all', f.thuKho !== 'all', f.vatTu.trim()
+      ].filter(Boolean).length
 
   const fmtDate   = d => d ? d.slice(8) + '/' + d.slice(5, 7) : ''
   const dateLabel = f.tuNgay === f.denNgay ? fmtDate(f.tuNgay) : `${fmtDate(f.tuNgay)}–${fmtDate(f.denNgay)}`
-  const rowCount  = tab === 'so_sanh' ? soSanhRows.length : displayData.length
+  const rowCount  = tab === 'so_sanh' ? soSanhRows.length : tab === 'ton_kho' ? displayTonKho.length : displayData.length
 
   return (
     <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -398,7 +438,9 @@ export default function BaoCao() {
 
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}>
         <span style={{ flex: 1, fontSize: 13, color: 'var(--text-muted)' }}>
-          {activeFilterCount > 0 ? `Ngày: ${dateLabel}` : `Hôm nay: ${dateLabel}`}
+          {tab === 'ton_kho'
+            ? (f.kho !== 'all' ? `Kho: ${khoMap[f.kho] || f.kho}` : 'Tất cả kho')
+            : activeFilterCount > 0 ? `Ngày: ${dateLabel}` : `Hôm nay: ${dateLabel}`}
         </span>
         <button onClick={() => setShowFilters(v => !v)} style={{
           padding: '0 16px', height: 38, borderRadius: 8, border: '1px solid var(--border)',
@@ -412,20 +454,22 @@ export default function BaoCao() {
 
       {showFilters && (
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8, background: '#F9FAFB' }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Từ ngày</div>
-              <input type="date" className="input-field" value={f.tuNgay}
-                onChange={e => upd('tuNgay', e.target.value)} style={{ width: '100%' }} />
+          {tab !== 'ton_kho' && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Từ ngày</div>
+                <input type="date" className="input-field" value={f.tuNgay}
+                  onChange={e => upd('tuNgay', e.target.value)} style={{ width: '100%' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Đến ngày</div>
+                <input type="date" className="input-field" value={f.denNgay}
+                  onChange={e => upd('denNgay', e.target.value)} style={{ width: '100%' }} />
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Đến ngày</div>
-              <input type="date" className="input-field" value={f.denNgay}
-                onChange={e => upd('denNgay', e.target.value)} style={{ width: '100%' }} />
-            </div>
-          </div>
+          )}
 
-          {tab !== 'so_sanh' && (
+          {tab !== 'so_sanh' && tab !== 'ton_kho' && (
             <div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Loại dữ liệu</div>
               <select className="input-select" value={f.loaiDuLieu}
@@ -436,54 +480,70 @@ export default function BaoCao() {
             </div>
           )}
 
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Phiên kiểm kê</div>
-            <select className="input-select" value={f.phien} onChange={e => upd('phien', e.target.value)} style={{ width: '100%' }}>
-              <option value="all">Tất cả phiên</option>
-              {phienList.map(p => {
-                const kt = userMap[p.ke_toan_id]?.ma_user || '?'
-                const tk = userMap[p.thu_kho_id]?.ma_user || '?'
-                const ma = p.id?.slice(-4).toUpperCase()
-                return <option key={p.id} value={p.id}>{p.ngay_kiem} · {p.ma_kho} · {kt}/{tk} #{ma}</option>
-              })}
-            </select>
-          </div>
+          {tab !== 'ton_kho' && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Phiên kiểm kê</div>
+              <select className="input-select" value={f.phien} onChange={e => upd('phien', e.target.value)} style={{ width: '100%' }}>
+                <option value="all">Tất cả phiên</option>
+                {phienList.map(p => {
+                  const kt = userMap[p.ke_toan_id]?.ma_user || '?'
+                  const tk = userMap[p.thu_kho_id]?.ma_user || '?'
+                  const ma = p.id?.slice(-4).toUpperCase()
+                  return <option key={p.id} value={p.id}>{p.ngay_kiem}{p.ma_kho ? ` · ${p.ma_kho}` : ''} · {kt}/{tk} #{ma}</option>
+                })}
+              </select>
+            </div>
+          )}
 
           <div style={{ display: 'flex', gap: 8 }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kho</div>
               <select className="input-select" value={f.kho} onChange={e => upd('kho', e.target.value)}
-                disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
+                disabled={tab !== 'ton_kho' && phienLocked}
+                style={{ width: '100%', opacity: (tab !== 'ton_kho' && phienLocked) ? 0.45 : 1 }}>
                 <option value="all">Tất cả kho</option>
                 {khoList.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
               </select>
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kế toán</div>
-              <select className="input-select" value={f.keToan} onChange={e => upd('keToan', e.target.value)}
-                disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
-                <option value="all">Tất cả</option>
-                {keToanList.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
-              </select>
-            </div>
+            {tab !== 'ton_kho' && (
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kế toán</div>
+                <select className="input-select" value={f.keToan} onChange={e => upd('keToan', e.target.value)}
+                  disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
+                  <option value="all">Tất cả</option>
+                  {keToanList.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
+                </select>
+              </div>
+            )}
           </div>
 
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Thủ kho</div>
-              <select className="input-select" value={f.thuKho} onChange={e => upd('thuKho', e.target.value)}
-                disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
-                <option value="all">Tất cả</option>
-                {thuKhoList.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
-              </select>
+          {tab !== 'ton_kho' && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Thủ kho</div>
+                <select className="input-select" value={f.thuKho} onChange={e => upd('thuKho', e.target.value)}
+                  disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
+                  <option value="all">Tất cả</option>
+                  {thuKhoList.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
+                <input className="input-field" value={f.vatTu}
+                  onChange={e => upd('vatTu', e.target.value)}
+                  placeholder="Mã hoặc tên VT" style={{ width: '100%' }} />
+              </div>
             </div>
-            <div style={{ flex: 1 }}>
+          )}
+
+          {tab === 'ton_kho' && (
+            <div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
               <input className="input-field" value={f.vatTu}
                 onChange={e => upd('vatTu', e.target.value)}
                 placeholder="Mã hoặc tên VT" style={{ width: '100%' }} />
             </div>
-          </div>
+          )}
 
           <button onClick={() => { setF(INIT_FILTERS); setShowFilters(false) }} style={{
             alignSelf: 'flex-end', padding: '4px 14px', fontSize: 12,
@@ -507,17 +567,66 @@ export default function BaoCao() {
 
       {tab !== 'so_sanh' && (
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <button className="btn-secondary"
-            onClick={() => downloadCSV(displayData, cols, filename)}
-            disabled={!displayData.length}
-            style={{ width: '100%', fontSize: 13 }}>
-            ⬇ Xuất CSV ({displayData.length} dòng)
-          </button>
+          {tab === 'ton_kho' ? (
+            <button className="btn-secondary"
+              onClick={() => downloadCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
+              disabled={!displayTonKho.length}
+              style={{ width: '100%', fontSize: 13 }}>
+              ⬇ Xuất CSV ({displayTonKho.length} dòng)
+            </button>
+          ) : (
+            <button className="btn-secondary"
+              onClick={() => downloadCSV(displayData, cols, filename)}
+              disabled={!displayData.length}
+              style={{ width: '100%', fontSize: 13 }}>
+              ⬇ Xuất CSV ({displayData.length} dòng)
+            </button>
+          )}
         </div>
       )}
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {loading ? (
+        {tab === 'ton_kho' ? (
+          loadingTonKho ? (
+            <div className="empty-state">Đang tải...</div>
+          ) : displayTonKho.length === 0 ? (
+            <div className="empty-state">
+              {tonKhoRows.length === 0 ? 'Không có dữ liệu tồn kho' : 'Không tìm thấy vật tư khớp'}
+            </div>
+          ) : (
+            <table style={{ borderCollapse: 'collapse', fontSize: 12, whiteSpace: 'nowrap', width: '100%' }}>
+              <thead>
+                <tr>
+                  {colTonKho.map(c => (
+                    <th key={c.label} style={{
+                      padding: '8px 12px', background: '#1D9E75', color: '#fff',
+                      fontWeight: 600, textAlign: c.label === 'SL sổ sách' ? 'right' : 'left',
+                      position: 'sticky', top: 0, zIndex: 1
+                    }}>{c.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {displayTonKho.map((row, i) => (
+                  <tr key={`${row.ma_vt}_${row.ma_kho}`} style={{ background: i % 2 === 0 ? '#fff' : '#F9FAFB' }}>
+                    {colTonKho.map(c => {
+                      const val = c.get(row, i)
+                      return (
+                        <td key={c.label} style={{
+                          padding: '7px 12px', borderBottom: '1px solid #F3F4F6',
+                          textAlign: c.label === 'SL sổ sách' ? 'right' : 'left',
+                          fontWeight: c.label === 'SL sổ sách' ? 600 : 400,
+                        }}>
+                          {val}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        ) : loading ? (
           <div className="empty-state">Đang tải...</div>
 
         ) : tab === 'so_sanh' ? (

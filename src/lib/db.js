@@ -5,22 +5,20 @@ import Dexie from 'dexie'
 export const db = new Dexie('KiemKeDB')
 
 db.version(1).stores({
-  // Danh mục — sync từ Supabase xuống, đọc offline
   dm_kho:    'ma_kho, ten_kho',
   dm_user:   'id, ma_user, role',
   dm_dvt:    'ma_dvt, ten_dvt',
   dm_vat_tu: 'ma_vt, ten_vt',
   ton_kho:   '[ma_vt+ma_kho], ma_kho',
-
-  // Dữ liệu kiểm kê — tạo offline, sync lên Supabase
   phien:     'id, ma_kho, ngay_kiem, synced',
   chitiet:   'id, phien_id, ma_vt, synced, created_at',
-
-  // Gợi ý vật tư — cache local
   goi_y_vat_tu: 'ma_vt, lan_kiem_gan_nhat',
-
-  // Queue sync — các record chờ đẩy lên Supabase
   sync_queue: '++id, table_name, record_id, action, created_at'
+})
+
+// v2: thêm ma_kho index vào chitiet (kho giờ ghi ở từng dòng, không ở phiên)
+db.version(2).stores({
+  chitiet: 'id, phien_id, ma_vt, ma_kho, synced, created_at'
 })
 
 // -----------------------------------------------
@@ -161,4 +159,8 @@ export async function getPendingSyncQueue() {
 
 export async function removeSyncQueueItem(id) {
   await db.sync_queue.delete(id)
+}
+
+export async function clearSyncQueue() {
+  await db.sync_queue.clear()
 }

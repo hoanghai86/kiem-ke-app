@@ -99,7 +99,7 @@
 
 .btn-sm-outline {
   font-size: 15px; font-weight: 600;
-  padding: 8px 18px;
+  height: 36px; padding: 0 18px;
   border-radius: 10px;
   border: none;
   color: white;
@@ -112,7 +112,7 @@
 /* Filter */
 .btn-filter-toggle {
   font-size: 13px; font-weight: 500;
-  padding: 6px 12px; border-radius: 8px;
+  height: 36px; padding: 0 12px; border-radius: 8px;
   border: 1px solid var(--border);
   background: white; color: var(--text);
   cursor: pointer;
@@ -256,8 +256,15 @@
 }
 
 .sync-fab.ok {
-  background: rgba(255,255,255,0.15);
-  color: rgba(255,255,255,0.65);
+  background: var(--amber-light);
+  color: var(--amber-dark);
+  box-shadow: 0 0 0 3px rgba(133,79,11,0.15);
+}
+
+.sync-fab.error {
+  background: #FEF2F2;
+  color: #DC2626;
+  box-shadow: 0 0 0 3px rgba(220,38,38,0.15);
 }
 
 .sync-badge {

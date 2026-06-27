@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabase'
-import { db } from './lib/db'
+import { db, clearSyncQueue } from './lib/db'
 import { pullDanhMuc, pushOfflineQueue } from './lib/sync'
 import BatDauPhien from './screens/BatDauPhien'
 import KiemKe from './screens/KiemKe'
@@ -77,6 +77,7 @@ export default function App() {
 
       {/* Sync FAB + Bottom nav — chỉ show khi đã login */}
       {user && <SyncButton />}
+      {user && <AccountButton currentUser={user} onLogout={() => supabase.auth.signOut()} />}
       {user && <BottomNav role={user.role} currentUser={user} onLogout={() => supabase.auth.signOut()} />}
     </BrowserRouter>
   )
@@ -86,6 +87,7 @@ function SyncButton() {
   const [online, setOnline] = useState(navigator.onLine)
   const [pending, setPending] = useState(0)
   const [syncing, setSyncing] = useState(false)
+  const [syncError, setSyncError] = useState(false)
   const isSyncing = useRef(false)
 
   async function refreshCount() {
@@ -96,14 +98,23 @@ function SyncButton() {
     if (isSyncing.current || !navigator.onLine) return
     isSyncing.current = true
     setSyncing(true)
+    setSyncError(false)
     try {
-      await pushOfflineQueue()
+      const result = await pushOfflineQueue()
       await pullDanhMuc()
       await refreshCount()
+      if (result?.errors > 0) setSyncError(true)
     } finally {
       isSyncing.current = false
       setSyncing(false)
     }
+  }
+
+  async function forceClear() {
+    if (!window.confirm('Xóa toàn bộ hàng đợi sync? Các bản ghi chưa sync sẽ không lên Supabase.')) return
+    await clearSyncQueue()
+    setSyncError(false)
+    await refreshCount()
   }
 
   useEffect(() => {
@@ -125,23 +136,38 @@ function SyncButton() {
     cls = 'sync-fab offline'; icon = '✕'; tip = 'Không có mạng'
   } else if (syncing) {
     cls = 'sync-fab syncing'; icon = '↻'; tip = 'Đang sync...'
+  } else if (syncError) {
+    cls = 'sync-fab error'; icon = '!'; tip = 'Sync lỗi — xem console'
   } else if (pending > 0) {
     cls = 'sync-fab pending'; icon = '↻'; tip = `${pending} mục chờ sync — nhấn để sync`
   } else {
-    cls = 'sync-fab ok'; icon = '✓'; tip = 'Đã đồng bộ'
+    cls = 'sync-fab ok'; icon = '↻'; tip = 'Đã đồng bộ'
   }
 
   return (
-    <button className={cls} onClick={doSync} title={tip} disabled={!online || syncing}>
-      <span className={syncing ? 'spin' : ''}>{icon}</span>
-      {pending > 0 && !syncing && (
-        <span className="sync-badge">{pending > 99 ? '99+' : pending}</span>
+    <>
+      <button className={cls} onClick={doSync} title={tip} disabled={!online || syncing}>
+        <span className={syncing ? 'spin' : ''}>{icon}</span>
+        {pending > 0 && !syncing && (
+          <span className="sync-badge">{pending > 99 ? '99+' : pending}</span>
+        )}
+      </button>
+      {syncError && pending > 0 && (
+        <button onClick={forceClear} style={{
+          position: 'fixed',
+          top: 48,
+          right: 'max(16px, calc((100vw - 480px) / 2 + 16px))',
+          zIndex: 20,
+          fontSize: 10, padding: '3px 8px', borderRadius: 20,
+          border: '1px solid #FCA5A5', background: '#FEF2F2',
+          color: '#DC2626', cursor: 'pointer', whiteSpace: 'nowrap'
+        }}>Xóa bị kẹt</button>
       )}
-    </button>
+    </>
   )
 }
 
-function BottomNav({ role, currentUser, onLogout }) {
+function AccountButton({ currentUser, onLogout }) {
   const navigate = useNavigate()
   const location = useLocation()
   const path = location.pathname
@@ -157,9 +183,55 @@ function BottomNav({ role, currentUser, onLogout }) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [showMenu])
 
-  // Extract phienId từ URL hiện tại
-  const phienIdMatch = path.match(/\/(kiem-ke|dem-lai|tong-hop)\/(.+)/)
-  const currentPhienId = phienIdMatch?.[2] || null
+  const isActive = path === '/account'
+
+  return (
+    <div ref={menuRef} style={{
+      position: 'fixed', top: 10,
+      right: 'max(58px, calc((100vw - 480px) / 2 + 58px))',
+      zIndex: 20
+    }}>
+      <button onClick={() => setShowMenu(v => !v)} style={{
+        width: 34, height: 34, borderRadius: '50%', border: 'none',
+        background: isActive ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.2)',
+        color: 'white', fontSize: 16, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center'
+      }}>👤</button>
+      {showMenu && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', right: 0,
+          background: '#fff', borderRadius: 10,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
+          minWidth: 190, overflow: 'hidden', zIndex: 200
+        }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{currentUser?.ho_ten}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              {currentUser?.ma_user} · {currentUser?.role === 'admin' ? 'Admin' : currentUser?.role === 'ke_toan' ? 'Kế toán' : 'Thủ kho'}
+            </div>
+          </div>
+          {[
+            { icon: '👤', label: 'Tài khoản của tôi', onClick: () => { navigate('/account'); setShowMenu(false) } },
+            { icon: '⏻', label: 'Đăng xuất', onClick: () => { onLogout(); setShowMenu(false) }, color: '#EF4444' }
+          ].map(item => (
+            <button key={item.label} onClick={item.onClick} style={{
+              width: '100%', padding: '12px 16px', border: 'none', background: 'none',
+              textAlign: 'left', fontSize: 14, cursor: 'pointer', display: 'flex',
+              alignItems: 'center', gap: 10, color: item.color || 'var(--text)'
+            }}>
+              <span>{item.icon}</span>{item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function BottomNav({ role }) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const path = location.pathname
 
   return (
     <div className="bottom-nav">
@@ -180,41 +252,10 @@ function BottomNav({ role, currentUser, onLogout }) {
       {role === 'admin' && (
         <button className={`nav-item ${path === '/admin' ? 'active' : ''}`}
           onClick={() => navigate('/admin')}>
-          <span className="nav-icon">📊</span>
+          <span className="nav-icon">⚙️</span>
           <span>Admin</span>
         </button>
       )}
-      <div ref={menuRef} style={{ position: 'relative' }}>
-        {showMenu && (
-          <div style={{
-            position: 'absolute', bottom: 'calc(100% + 8px)', right: 0,
-            background: '#fff', borderRadius: 10,
-            boxShadow: '0 4px 24px rgba(0,0,0,0.15)',
-            minWidth: 190, overflow: 'hidden', zIndex: 200
-          }}>
-            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ fontWeight: 600, fontSize: 14 }}>{currentUser?.ho_ten}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{currentUser?.ma_user} · {currentUser?.role === 'admin' ? 'Admin' : currentUser?.role === 'ke_toan' ? 'Kế toán' : 'Thủ kho'}</div>
-            </div>
-            {[
-              { icon: '👤', label: 'Tài khoản của tôi', onClick: () => { navigate('/account'); setShowMenu(false) } },
-              { icon: '⏻', label: 'Đăng xuất', onClick: () => { onLogout(); setShowMenu(false) }, color: '#EF4444' }
-            ].map(item => (
-              <button key={item.label} onClick={item.onClick} style={{
-                width: '100%', padding: '12px 16px', border: 'none', background: 'none',
-                textAlign: 'left', fontSize: 14, cursor: 'pointer', display: 'flex',
-                alignItems: 'center', gap: 10, color: item.color || 'var(--text)'
-              }}>
-                <span>{item.icon}</span>{item.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <button className={`nav-item ${path === '/account' ? 'active' : ''}`} onClick={() => setShowMenu(v => !v)}>
-          <span className="nav-icon">👤</span>
-          <span>Tài khoản</span>
-        </button>
-      </div>
     </div>
   )
 }

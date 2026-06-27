@@ -51,7 +51,9 @@ export async function pullDanhMuc() {
 // -----------------------------------------------
 export async function pushOfflineQueue() {
   const queue = await getPendingSyncQueue()
-  if (!queue.length) return
+  if (!queue.length) return { errors: 0 }
+
+  let errors = 0
 
   for (const item of queue) {
     try {
@@ -61,6 +63,7 @@ export async function pushOfflineQueue() {
         if (supabaseTable) {
           const { error } = await supabase.from(supabaseTable).delete().eq('id', item.record_id)
           if (!error) await removeSyncQueueItem(item.id)
+          else { console.error('[Sync] Lỗi delete:', supabaseTable, error.message); errors++ }
         }
         continue
       }
@@ -69,11 +72,11 @@ export async function pushOfflineQueue() {
         const record = await db.phien.get(item.record_id)
         if (!record) { await removeSyncQueueItem(item.id); continue }
 
-        const { error } = await supabase
-          .from('phien_kiem_ke')
-          .upsert(toSupabasePhien(record))
-
-        if (!error) {
+        const { error } = await supabase.from('phien_kiem_ke').upsert(toSupabasePhien(record))
+        if (error) {
+          console.error('[Sync] Lỗi upsert phien:', error.message, record.id)
+          errors++
+        } else {
           await db.phien.update(item.record_id, { synced: true })
           await removeSyncQueueItem(item.id)
         }
@@ -83,21 +86,33 @@ export async function pushOfflineQueue() {
         const record = await db.chitiet.get(item.record_id)
         if (!record) { await removeSyncQueueItem(item.id); continue }
 
-        const { error } = await supabase
-          .from('kiem_ke_chitiet')
-          .upsert(toSupabaseChiTiet(record))
+        // Đảm bảo phiên cha đã có trên Supabase trước (tránh FK fail)
+        if (record.phien_id) {
+          const phien = await db.phien.get(record.phien_id)
+          if (phien && !phien.synced) {
+            const { error: pe } = await supabase.from('phien_kiem_ke').upsert(toSupabasePhien(phien))
+            if (!pe) await db.phien.update(phien.id, { synced: true })
+            else console.error('[Sync] Lỗi upsert phien cha của chitiet:', pe.message)
+          }
+        }
 
-        if (!error) {
+        const { error } = await supabase.from('kiem_ke_chitiet').upsert(toSupabaseChiTiet(record))
+        if (error) {
+          console.error('[Sync] Lỗi upsert chitiet:', error.message, record.id)
+          errors++
+        } else {
           await db.chitiet.update(item.record_id, { synced: true })
           await removeSyncQueueItem(item.id)
         }
       }
     } catch (err) {
       console.error('[Sync] Push lỗi item:', item.id, err)
+      errors++
     }
   }
 
-  console.log('[Sync] Push queue xong')
+  console.log(`[Sync] Push queue xong — lỗi: ${errors}`)
+  return { errors }
 }
 
 // -----------------------------------------------
@@ -142,13 +157,13 @@ export function startSyncListener() {
 function toSupabasePhien(r) {
   return {
     id: r.id,
-    ma_kho: r.ma_kho,
+    ma_kho: r.ma_kho || null,
     ke_toan_id: r.ke_toan_id,
     thu_kho_id: r.thu_kho_id,
     ngay_kiem: r.ngay_kiem,
     trang_thai: r.trang_thai,
-    ke_toan_xac_nhan: r.ke_toan_xac_nhan ?? false,
-    thu_kho_xac_nhan: r.thu_kho_xac_nhan ?? false
+    xac_nhan_ke_toan: r.xac_nhan_ke_toan ?? false,
+    xac_nhan_thu_kho: r.xac_nhan_thu_kho ?? false
   }
 }
 
@@ -158,6 +173,7 @@ function toSupabaseChiTiet(r) {
     phien_id: r.phien_id,
     ma_vt: r.ma_vt,
     ten_vt: r.ten_vt,
+    ma_kho: r.ma_kho || null,
     ma_dvt_kiem: r.ma_dvt_kiem,
     he_so_quy_doi: r.he_so_quy_doi,
     luot_kiem: r.luot_kiem,

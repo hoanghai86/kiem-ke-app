@@ -5,6 +5,27 @@ import { db, toggleDoiChieu, updateChiTiet, deleteChiTiet } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue } from '../lib/sync'
 
+function buildSummaryData(rows, ktId, tkId) {
+  const grouped = {}
+  rows.forEach(r => {
+    if (!grouped[r.ma_vt]) {
+      grouped[r.ma_vt] = { ma_vt: r.ma_vt, ten_vt: r.ten_vt, rowsKT: [], rowsTK: [] }
+    }
+    if (r.nguoi_nhap_id === ktId) grouped[r.ma_vt].rowsKT.push(r)
+    else if (r.nguoi_nhap_id === tkId) grouped[r.ma_vt].rowsTK.push(r)
+  })
+  return Object.values(grouped).map(g => {
+    const slKT = g.rowsKT.reduce((s, r) => s + (r.so_luong_quy_doi ?? 0), 0)
+    const slTK = g.rowsTK.reduce((s, r) => s + (r.so_luong_quy_doi ?? 0), 0)
+    return {
+      ...g, slKT, slTK,
+      chenh: parseFloat((slKT - slTK).toFixed(6)),
+      allConfirmedKT: g.rowsKT.length > 0 && g.rowsKT.every(r => r.da_doi_chieu),
+      allConfirmedTK: g.rowsTK.length > 0 && g.rowsTK.every(r => r.da_doi_chieu),
+    }
+  }).sort((a, b) => a.ma_vt.localeCompare(b.ma_vt))
+}
+
 export default function DemLai({ currentUser }) {
   const { phienId } = useParams()
   const navigate = useNavigate()
@@ -25,6 +46,12 @@ export default function DemLai({ currentUser }) {
   const [tab, setTab] = useState('chua')
   const [filterKL, setFilterKL] = useState('lech')  // 'lech' | 'khop'
 
+  // Bộ lọc tổng hợp
+  const [showFilters, setShowFilters] = useState(false)
+  const [filterKho, setFilterKho] = useState('')
+  const [filterVatTu, setFilterVatTu] = useState('')
+  const [danhMucKho, setDanhMucKho] = useState([])
+
   // Điều hướng 3 cấp: summary → drill-down → edit
   const [selectedVatTu, setSelectedVatTu] = useState(null)  // ma_vt string
   const [detailItem, setDetailItem] = useState(null)
@@ -34,29 +61,8 @@ export default function DemLai({ currentUser }) {
 
   useEffect(() => { load() }, [phienId])
 
-  // Xây summary rows từ allRows: gộp theo mã VT, tính tổng cho cả KT lẫn TK
   function buildSummary(rows, ktId, tkId) {
-    const grouped = {}
-    rows.forEach(r => {
-      if (!grouped[r.ma_vt]) {
-        grouped[r.ma_vt] = { ma_vt: r.ma_vt, ten_vt: r.ten_vt, rowsKT: [], rowsTK: [] }
-      }
-      if (r.nguoi_nhap_id === ktId) grouped[r.ma_vt].rowsKT.push(r)
-      else if (r.nguoi_nhap_id === tkId) grouped[r.ma_vt].rowsTK.push(r)
-    })
-
-    const summary = Object.values(grouped).map(g => {
-      const slKT = g.rowsKT.reduce((s, r) => s + (r.so_luong_quy_doi ?? 0), 0)
-      const slTK = g.rowsTK.reduce((s, r) => s + (r.so_luong_quy_doi ?? 0), 0)
-      return {
-        ...g, slKT, slTK,
-        chenh: parseFloat((slKT - slTK).toFixed(6)),
-        allConfirmedKT: g.rowsKT.length > 0 && g.rowsKT.every(r => r.da_doi_chieu),
-        allConfirmedTK: g.rowsTK.length > 0 && g.rowsTK.every(r => r.da_doi_chieu),
-      }
-    })
-
-    summary.sort((a, b) => a.ma_vt.localeCompare(b.ma_vt))
+    const summary = buildSummaryData(rows, ktId, tkId)
     setSummaryRows(summary)
     return summary
   }
@@ -68,23 +74,33 @@ export default function DemLai({ currentUser }) {
     setPhienData(p)
     setIsLocked(p ? !!(p.xac_nhan_ke_toan || p.xac_nhan_thu_kho) : false)
 
-    const dvtList = await db.dm_dvt.toArray()
+    const [dvtList, khoList] = await Promise.all([
+      db.dm_dvt.toArray(),
+      db.dm_kho.toArray()
+    ])
     const dMap = {}
     dvtList.forEach(d => { dMap[d.ma_dvt] = d.ten_dvt })
     setDvtMap(dMap)
     setDanhMucDvt(dvtList)
+    setDanhMucKho(khoList)
 
     const { data: { user } } = await supabase.auth.getUser()
     const uid = user?.id
     setMyId(uid)
 
     if (navigator.onLine) {
-      const { data: vtData } = await supabase
-        .from('dm_vat_tu').select('ma_vt, ma_dvt_chinh').eq('active', true)
-      if (vtData?.length) {
+      const [vtRes, khoRes] = await Promise.all([
+        supabase.from('dm_vat_tu').select('ma_vt, ma_dvt_chinh').eq('active', true),
+        supabase.from('dm_kho').select('*').eq('active', true).order('ten_kho')
+      ])
+      if (vtRes.data?.length) {
         const cMap = {}
-        vtData.forEach(v => { if (v.ma_dvt_chinh) cMap[v.ma_vt] = v.ma_dvt_chinh })
+        vtRes.data.forEach(v => { if (v.ma_dvt_chinh) cMap[v.ma_vt] = v.ma_dvt_chinh })
         setDvtChinhMap(cMap)
+      }
+      if (khoRes.data?.length) {
+        await db.dm_kho.bulkPut(khoRes.data)
+        setDanhMucKho(khoRes.data)
       }
       // Lấy toàn bộ dữ liệu của phiên (cả KT lẫn TK) để so sánh
       const { data } = await supabase
@@ -99,6 +115,9 @@ export default function DemLai({ currentUser }) {
       const cMap = {}
       vtList.forEach(v => { if (v.ma_dvt_chinh) cMap[v.ma_vt] = v.ma_dvt_chinh })
       setDvtChinhMap(cMap)
+      // Reload kho từ IndexedDB (đã có thể được update từ lần online trước)
+      const freshKho = await db.dm_kho.toArray()
+      if (freshKho.length) setDanhMucKho(freshKho)
     }
 
     const rows = await db.chitiet.where('phien_id').equals(phienId).toArray()
@@ -332,22 +351,18 @@ export default function DemLai({ currentUser }) {
     return (
       <div className="screen">
         <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
-            <button onClick={() => setSelectedVatTu(null)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: '#F1F5F9', border: 'none', borderRadius: 8,
-                padding: '6px 12px', fontSize: 13, fontWeight: 600,
-                color: '#334155', cursor: 'pointer', flexShrink: 0
-              }}>
-              ← Quay lại
-            </button>
-            <div className="topbar-title">{liveGroup.ma_vt} · {liveGroup.ten_vt}</div>
-          </div>
+          <div className="topbar-title">{liveGroup.ma_vt} · {liveGroup.ten_vt}</div>
           <div className="topbar-sub">{myRows.length} dòng kiểm kê</div>
         </div>
 
         <div className="content">
+          <div className="mode-toggle" style={{ marginBottom: 12 }}>
+            <button className="mode-tab active" style={{ fontWeight: 700, fontSize: 15 }}
+              onClick={() => setSelectedVatTu(null)}>
+              ← Đếm lại
+            </button>
+          </div>
+
           {/* Banner tổng KT vs TK */}
           <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
             <div style={{ flex: 1, background: '#EFF6FF', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
@@ -427,27 +442,45 @@ export default function DemLai({ currentUser }) {
   const uid = getActiveUserId()
   const isKT = uid === phienPeople?.ktId
 
-  const tongMaVT = summaryRows.length
-  const tongLech = summaryRows.filter(g => g.chenh !== 0).length
-  const displayRows = summaryRows.filter(g => filterKL === 'lech' ? g.chenh !== 0 : g.chenh === 0)
+  // Kho: dùng catalog đầy đủ để dropdown luôn có dữ liệu
+  const khoOptions = danhMucKho
+
+  // Áp dụng bộ lọc kho lên allRows trước khi tính summary
+  // Fallback về phienData.ma_kho cho record cũ chưa có ma_kho ở chitiet
+  const phienMaKho = phienData?.ma_kho
+  const filteredBaseRows = filterKho
+    ? allRows.filter(r => (r.ma_kho || phienMaKho) === filterKho)
+    : allRows
+
+  // Tính summary từ rows đã lọc (đảm bảo tổng KT/TK phản ánh đúng bộ lọc)
+  const filteredSummary = phienPeople
+    ? buildSummaryData(filteredBaseRows, phienPeople.ktId, phienPeople.tkId)
+    : []
+
+  // Lọc theo mã/tên vật tư (text search)
+  const kw = filterVatTu.trim().toLowerCase()
+  const afterVatTuFilter = kw
+    ? filteredSummary.filter(g => g.ma_vt.toLowerCase().includes(kw) || g.ten_vt.toLowerCase().includes(kw))
+    : filteredSummary
+
+  const hasFilters = !!(filterKho || filterVatTu)
+  const tongMaVT = afterVatTuFilter.length
+  const tongLech = afterVatTuFilter.filter(g => g.chenh !== 0).length
+  const displayRows = afterVatTuFilter.filter(g => filterKL === 'lech' ? g.chenh !== 0 : g.chenh === 0)
 
   return (
     <div className="screen">
       <div className="topbar">
         <div className="topbar-title">Đếm lại</div>
-        <div className="topbar-sub">{tongLech} lệch / {tongMaVT} mã</div>
+        <div className="topbar-sub">{tongLech} lệch / {tongMaVT} mã{hasFilters ? ' · đang lọc' : ''}</div>
       </div>
 
       <div className="content">
-        {/* Toggle chế độ */}
         <div className="mode-toggle">
-          <button className="mode-tab" onClick={() => navigate(`/kiem-ke/${phienId}?mode=1_ma`)}>
-            📦 1 mã nhiều lần
+          <button className="mode-tab active" style={{ fontWeight: 700, fontSize: 15 }}
+            onClick={() => navigate(`/kiem-ke/${phienId}`)}>
+            ← Tiếp tục kiểm kê
           </button>
-          <button className="mode-tab" onClick={() => navigate(`/kiem-ke/${phienId}?mode=nhieu_ma`)}>
-            📋 Nhiều mã 1 lần
-          </button>
-          <button className="mode-tab active">✓ Đếm lại</button>
         </div>
 
         {/* Admin: chọn xem số liệu của ai */}
@@ -467,7 +500,7 @@ export default function DemLai({ currentUser }) {
         )}
 
         {/* Bộ lọc Khớp / Lệch */}
-        <div className="mode-toggle" style={{ marginBottom: 12 }}>
+        <div className="mode-toggle" style={{ marginBottom: 8 }}>
           <button className={`mode-tab ${filterKL === 'lech' ? 'active' : ''}`}
             onClick={() => setFilterKL('lech')}>
             Lệch số ({tongLech})
@@ -476,6 +509,42 @@ export default function DemLai({ currentUser }) {
             onClick={() => setFilterKL('khop')}>
             Khớp số ({tongMaVT - tongLech})
           </button>
+        </div>
+
+        {/* Bộ lọc mở rộng */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <button className="btn-filter-toggle" onClick={() => setShowFilters(v => !v)}>
+              Bộ lọc {hasFilters ? '●' : ''} {showFilters ? '▲' : '▼'}
+            </button>
+            {hasFilters && (
+              <button className="btn-clear-filter"
+                onClick={() => { setFilterKho(''); setFilterVatTu('') }}>
+                Xóa lọc
+              </button>
+            )}
+          </div>
+
+          {showFilters && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#F9FAFB', borderRadius: 10, padding: '10px 12px', border: '1px solid var(--border)' }}>
+              <div className="field-group" style={{ marginBottom: 0 }}>
+                <label className="field-label">Kho</label>
+                <select className="input-select" value={filterKho}
+                  onChange={e => setFilterKho(e.target.value)}>
+                  <option value="">Tất cả kho</option>
+                  {khoOptions.map(k => (
+                    <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field-group" style={{ marginBottom: 0 }}>
+                <label className="field-label">Vật tư</label>
+                <input type="text" className="input-field" value={filterVatTu}
+                  onChange={e => setFilterVatTu(e.target.value)}
+                  placeholder="Gõ tên hoặc mã vật tư..." />
+              </div>
+            </div>
+          )}
         </div>
 
         {loading ? (

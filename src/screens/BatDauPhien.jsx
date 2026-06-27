@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { db, createPhienLocal, updatePhienLocal, deletePhienLocal } from '../lib/db'
 import { supabase } from '../lib/supabase'
-import { pushOfflineQueue } from '../lib/sync'
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -21,7 +20,7 @@ export default function BatDauPhien({ currentUser }) {
   // Mode: 'list' | 'create' | 'edit'
   const [mode, setMode] = useState('list')
   const [editPhien, setEditPhien] = useState(null)
-  const [form, setForm] = useState({ maKho: '', keToanId: '', thuKhoId: '', ngayKiem: TODAY, trangThai: 'dang_kiem' })
+  const [form, setForm] = useState({ keToanId: '', thuKhoId: '', ngayKiem: TODAY, trangThai: 'dang_kiem' })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
 
@@ -32,7 +31,7 @@ export default function BatDauPhien({ currentUser }) {
 
   // Filters
   const [showFilters, setShowFilters] = useState(false)
-  const [filters, setFilters] = useState({ maKho: '', keToanId: '', thuKhoId: '', tuNgay: '', denNgay: '', trangThai: '' })
+  const [filters, setFilters] = useState({ keToanId: '', thuKhoId: '', tuNgay: '', denNgay: '', trangThai: '' })
 
   // Danh mục
   const [danhMucKho, setDanhMucKho] = useState([])
@@ -130,7 +129,6 @@ export default function BatDauPhien({ currentUser }) {
   // ── CREATE ──────────────────────────────────────────────────────────
   function openCreate() {
     setForm({
-      maKho: '',
       keToanId: currentUser.role === 'ke_toan' ? currentUser.id : '',
       thuKhoId: currentUser.role === 'thu_kho' ? currentUser.id : '',
       ngayKiem: TODAY,
@@ -141,23 +139,42 @@ export default function BatDauPhien({ currentUser }) {
   }
 
   async function handleCreate() {
-    if (!form.maKho || !form.keToanId || !form.thuKhoId) {
-      setFormError('Vui lòng điền đầy đủ kho, kế toán, thủ kho.')
+    if (!form.keToanId || !form.thuKhoId) {
+      setFormError('Vui lòng chọn kế toán và thủ kho.')
       return
     }
     setSaving(true)
     const phien = {
       id: crypto.randomUUID(),
-      ma_kho: form.maKho,
       ke_toan_id: form.keToanId,
       thu_kho_id: form.thuKhoId,
       ngay_kiem: form.ngayKiem,
       trang_thai: form.trangThai,
       created_at: new Date().toISOString()
     }
-    await createPhienLocal(phien)
-    if (navigator.onLine) pushOfflineQueue()
-    setPhienList(prev => [{ ...phien, synced: false }, ...prev])
+
+    if (navigator.onLine) {
+      const { error } = await supabase.from('phien_kiem_ke').insert({
+        id: phien.id,
+        ma_kho: null,
+        ke_toan_id: phien.ke_toan_id,
+        thu_kho_id: phien.thu_kho_id,
+        ngay_kiem: phien.ngay_kiem,
+        trang_thai: phien.trang_thai,
+        xac_nhan_ke_toan: false,
+        xac_nhan_thu_kho: false
+      })
+      if (error) {
+        setFormError(`Lỗi lưu phiên: ${error.message}`)
+        setSaving(false)
+        return
+      }
+      await db.phien.put({ ...phien, synced: true })
+    } else {
+      await createPhienLocal(phien)
+    }
+
+    setPhienList(prev => [{ ...phien, synced: navigator.onLine }, ...prev])
     setSaving(false)
     setMode('list')
   }
@@ -166,7 +183,6 @@ export default function BatDauPhien({ currentUser }) {
   function openEdit(phien) {
     setEditPhien(phien)
     setForm({
-      maKho: phien.ma_kho,
       keToanId: phien.ke_toan_id,
       thuKhoId: phien.thu_kho_id,
       ngayKiem: phien.ngay_kiem?.slice(0, 10) || TODAY,
@@ -177,13 +193,12 @@ export default function BatDauPhien({ currentUser }) {
   }
 
   async function handleUpdate() {
-    if (!form.maKho || !form.keToanId || !form.thuKhoId) {
-      setFormError('Vui lòng điền đầy đủ kho, kế toán, thủ kho.')
+    if (!form.keToanId || !form.thuKhoId) {
+      setFormError('Vui lòng chọn kế toán và thủ kho.')
       return
     }
     setSaving(true)
     const changes = {
-      ma_kho: form.maKho,
       ke_toan_id: form.keToanId,
       thu_kho_id: form.thuKhoId,
       ngay_kiem: form.ngayKiem,
@@ -191,20 +206,43 @@ export default function BatDauPhien({ currentUser }) {
       // Reset xác nhận khi admin mở lại phiên
       ...(form.trangThai === 'dang_kiem' && { xac_nhan_ke_toan: false, xac_nhan_thu_kho: false })
     }
-    await updatePhienLocal(editPhien.id, changes)
+
+    if (navigator.onLine) {
+      const { error } = await supabase.from('phien_kiem_ke').update(changes).eq('id', editPhien.id)
+      if (error) {
+        setFormError(`Lỗi cập nhật phiên: ${error.message}`)
+        setSaving(false)
+        return
+      }
+      await db.phien.update(editPhien.id, { ...changes, synced: true })
+    } else {
+      await updatePhienLocal(editPhien.id, changes)
+    }
+
     setPhienList(prev => prev.map(p =>
       p.id === editPhien.id ? { ...p, ...changes } : p
     ))
-    if (navigator.onLine) pushOfflineQueue()
     setSaving(false)
     setMode('list')
   }
 
   // ── DELETE ───────────────────────────────────────────────────────────
   async function handleDelete(phien) {
+    const soChiTiet = await db.chitiet.where('phien_id').equals(phien.id).count()
+    if (soChiTiet > 0) {
+      showToast(`Không thể xóa — phiên này đã có ${soChiTiet} dòng số liệu`)
+      return
+    }
+    if (!window.confirm('Xóa phiên kiểm kê này?')) return
     setPhienList(prev => prev.filter(p => p.id !== phien.id))
-    await deletePhienLocal(phien.id)
-    if (navigator.onLine) pushOfflineQueue()
+    if (navigator.onLine) {
+      await supabase.from('kiem_ke_chitiet').delete().eq('phien_id', phien.id)
+      await supabase.from('phien_kiem_ke').delete().eq('id', phien.id)
+      await db.chitiet.where('phien_id').equals(phien.id).delete()
+      await db.phien.delete(phien.id)
+    } else {
+      await deletePhienLocal(phien.id)
+    }
   }
 
   // ── XÁC NHẬN HOÀN THÀNH ──────────────────────────────────────────────
@@ -236,7 +274,6 @@ export default function BatDauPhien({ currentUser }) {
 
   // ── FILTER ───────────────────────────────────────────────────────────
   const filtered = phienList.filter(p => {
-    if (filters.maKho && p.ma_kho !== filters.maKho) return false
     if (filters.keToanId && p.ke_toan_id !== filters.keToanId) return false
     if (filters.thuKhoId && p.thu_kho_id !== filters.thuKhoId) return false
     if (filters.trangThai && p.trang_thai !== filters.trangThai) return false
@@ -248,7 +285,7 @@ export default function BatDauPhien({ currentUser }) {
   const hasFilters = Object.values(filters).some(v => v !== '')
 
   function clearFilters() {
-    setFilters({ maKho: '', keToanId: '', thuKhoId: '', tuNgay: '', denNgay: '', trangThai: '' })
+    setFilters({ keToanId: '', thuKhoId: '', tuNgay: '', denNgay: '', trangThai: '' })
   }
 
   // ── SUB-SCREEN: Tạo / Sửa ──────────────────────────────────────────
@@ -262,16 +299,6 @@ export default function BatDauPhien({ currentUser }) {
 
         <div className="content">
           {formError && <div className="error-box">{formError}</div>}
-
-          <div className="field-group">
-            <label className="field-label">Kho kiểm</label>
-            <select className="input-select" value={form.maKho}
-              onChange={e => setForm(f => ({ ...f, maKho: e.target.value }))}
-              disabled={loadingDM}>
-              <option value="">{loadingDM ? 'Đang tải...' : '-- Chọn kho --'}</option>
-              {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
-            </select>
-          </div>
 
           <div className="field-group">
             <label className="field-label">Kế toán</label>
@@ -307,7 +334,7 @@ export default function BatDauPhien({ currentUser }) {
               <input type="date" className="input-field" value={form.ngayKiem}
                 onChange={e => setForm(f => ({ ...f, ngayKiem: e.target.value }))} />
             </div>
-            {isEdit && (
+            {isEdit && currentUser.role === 'admin' && (
               <div className="field-group">
                 <label className="field-label">Tình trạng</label>
                 <select className="input-select" value={form.trangThai}
@@ -361,14 +388,6 @@ export default function BatDauPhien({ currentUser }) {
           <div className="filter-panel">
             <div className="row-2col">
               <div className="field-group">
-                <label className="field-label">Kho kiểm</label>
-                <select className="input-select" value={filters.maKho}
-                  onChange={e => setFilters(f => ({ ...f, maKho: e.target.value }))}>
-                  <option value="">Tất cả</option>
-                  {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
-                </select>
-              </div>
-              <div className="field-group">
                 <label className="field-label">Tình trạng</label>
                 <select className="input-select" value={filters.trangThai}
                   onChange={e => setFilters(f => ({ ...f, trangThai: e.target.value }))}>
@@ -420,7 +439,7 @@ export default function BatDauPhien({ currentUser }) {
           </div>
         ) : (
           filtered.map(p => {
-            const tenKho   = khoMap[p.ma_kho] || p.ma_kho
+            const tenKho   = p.ma_kho ? (khoMap[p.ma_kho] || p.ma_kho) : null
             const tenKT    = userMap[p.ke_toan_id] || '—'
             const tenTK    = userMap[p.thu_kho_id] || '—'
             const ngay     = new Date(p.ngay_kiem || p.created_at)
@@ -439,9 +458,9 @@ export default function BatDauPhien({ currentUser }) {
                   }}
                   style={{ cursor: (dangKiem && !isLocked) ? 'pointer' : 'not-allowed' }}>
                   <div className="phien-card-info">
-                    <div className="phien-card-kho">{tenKho}</div>
+                    <div className="phien-card-kho">Mã phiên: #{maPhien}</div>
                     <div className="phien-card-meta">{ngay} {gio} · {tenKT} & {tenTK}</div>
-                    <div className="phien-card-meta" style={{ marginTop: 2 }}>Mã phiên: <strong>#{maPhien}</strong></div>
+                    {tenKho && <div className="phien-card-meta" style={{ marginTop: 2 }}>{tenKho}</div>}
                   </div>
                   <span className={`badge ${dangKiem ? 'badge-warn' : 'badge-ok'}`}>
                     {dangKiem ? 'Đang kiểm' : 'Hoàn thành'}
@@ -473,8 +492,8 @@ export default function BatDauPhien({ currentUser }) {
                               <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>{label}</span>
                               <span>
                                 {confirmed
-                                  ? (isMe ? '✕ Bỏ xác nhận' : '✓ Đã xác nhận')
-                                  : (isMe ? '✓ Xác nhận hoàn thành' : '○ Chưa xác nhận')}
+                                  ? (isMe ? '✕ Bấm để bỏ xác nhận' : '✓ Đã xác nhận')
+                                  : (isMe ? '✓ Bấm để xác nhận hoàn thành' : '○ Chưa xác nhận')}
                               </span>
                             </button>
                           )

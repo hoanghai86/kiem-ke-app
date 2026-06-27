@@ -90,10 +90,10 @@ export default function Login({ onLogin }) {
             className="input-field"
             placeholder="VD: KT01"
             value={maUser}
-            onChange={e => setMaUser(e.target.value)}
+            onChange={e => setMaUser(e.target.value.toUpperCase())}
             onKeyDown={e => e.key === 'Enter' && handleLogin()}
             autoComplete="username"
-            autoCapitalize="none"
+            autoCapitalize="characters"
           />
         </div>
 

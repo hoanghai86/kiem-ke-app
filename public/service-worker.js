@@ -1,15 +1,17 @@
 // public/service-worker.js
-const CACHE_NAME = 'kiem-ke-v1'
+const CACHE_NAME = 'kiem-ke-v2'
+
+// Chỉ pre-cache các file có tên cố định — JS/CSS/chunk có hash sẽ được cache động khi fetch
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/static/js/main.chunk.js',
-  '/static/js/bundle.js',
-  '/static/css/main.chunk.css',
-  '/manifest.json'
+  '/manifest.json',
+  '/favicon.ico',
+  '/logo192.png',
+  '/logo512.png'
 ]
 
-// Install — cache static assets
+// Install — cache shell tối thiểu
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))

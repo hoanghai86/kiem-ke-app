@@ -230,9 +230,21 @@ body {
 .chip-name { font-size: 13px; font-weight: 600; color: var(--green-dark); }
 .chip-meta { font-size: 11px; color: var(--green-dark); opacity: 0.75; margin-top: 2px; }
 .chip-change {
-  font-size: 12px; color: var(--green-dark);
-  text-decoration: underline; cursor: pointer;
-  white-space: nowrap; flex-shrink: 0;
+  flex-shrink: 0;
+  padding: 5px 11px;
+  border-radius: 20px;
+  border: 1.5px solid var(--green);
+  background: #fff;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.chip-change:active {
+  background: var(--green);
+  color: #fff;
 }
 
 /* ==================== GRID ==================== */
@@ -268,7 +280,7 @@ body {
 
 /* ==================== LIST ITEMS ==================== */
 .item-row {
-  display: flex; align-items: center; gap: 10px;
+  display: block;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
