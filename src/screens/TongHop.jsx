@@ -18,6 +18,7 @@ export default function TongHop({ currentUser }) {
   const [detailGroup, setDetailGroup] = useState(null)
   const [saving, setSaving]         = useState(false)
   const [tab, setTab]               = useState('chenh')
+  const [adminIdSet, setAdminIdSet] = useState(new Set())
 
   useEffect(() => { load() }, [phienId])
 
@@ -70,6 +71,10 @@ export default function TongHop({ currentUser }) {
       }
     }
 
+    const adminUsers = await db.dm_user.where('role').equals('admin').toArray()
+    const localAdminSet = new Set(adminUsers.map(u => u.id))
+    setAdminIdSet(localAdminSet)
+
     const ma_kho      = phienData?.ma_kho
     const ke_toan_id  = phienData?.ke_toan_id
     const thu_kho_id  = phienData?.thu_kho_id
@@ -87,7 +92,7 @@ export default function TongHop({ currentUser }) {
       const maDvtC    = cMap[ma_vt]
       const tenDvtC   = maDvtC ? (dMap[maDvtC] || maDvtC) : ''
 
-      const ktRows = group.rows.filter(r => r.nguoi_nhap_id === ke_toan_id)
+      const ktRows = group.rows.filter(r => r.nguoi_nhap_id === ke_toan_id || localAdminSet.has(r.nguoi_nhap_id))
       const tkRows = group.rows.filter(r => r.nguoi_nhap_id === thu_kho_id)
 
       const ktTong = ktRows.reduce((s, r) => s + (r.so_luong_quy_doi ?? r.so_luong_thuc_te ?? 0), 0)
@@ -116,8 +121,8 @@ export default function TongHop({ currentUser }) {
         khop_nhau: khopNhau, chenh_ss: chenhSS,
         kt_co_data: ktCoData, tk_co_data: tkCoData,
         rows: group.rows.sort((a, b) => {
-          const aKT = a.nguoi_nhap_id === ke_toan_id
-          const bKT = b.nguoi_nhap_id === ke_toan_id
+          const aKT = a.nguoi_nhap_id === ke_toan_id || localAdminSet.has(a.nguoi_nhap_id)
+          const bKT = b.nguoi_nhap_id === ke_toan_id || localAdminSet.has(b.nguoi_nhap_id)
           if (aKT && !bKT) return -1
           if (!aKT && bKT) return 1
           return a.luot_kiem - b.luot_kiem
@@ -222,8 +227,8 @@ export default function TongHop({ currentUser }) {
               </thead>
               <tbody>
                 {rows.map(r => {
-                  const isKT = r.nguoi_nhap_id === phien?.ke_toan_id
-                  const isTK = r.nguoi_nhap_id === phien?.thu_kho_id
+                  const isKT = r.nguoi_nhap_id === phien?.ke_toan_id || adminIdSet.has(r.nguoi_nhap_id)
+                  const isTK = r.nguoi_nhap_id === phien?.thu_kho_id && !adminIdSet.has(r.nguoi_nhap_id)
                   const lbl  = isKT ? 'KT' : isTK ? 'TK' : '?'
                   return (
                     <tr key={r.id}>
