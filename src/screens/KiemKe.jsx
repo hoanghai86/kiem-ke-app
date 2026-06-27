@@ -336,6 +336,17 @@ export default function KiemKe({ currentUser }) {
           </div>
         </div>
 
+        {/* Lưu / Hủy — đặt ngay dưới ô nhập để không bị bàn phím che */}
+        <div className="row-2col">
+          <button className="btn-secondary" onClick={handleHuy} disabled={saving}>
+            Hủy
+          </button>
+          <button className="btn-primary" onClick={handleLuu}
+            disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
+            {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
+          </button>
+        </div>
+
         {/* Hàng 2: Quy đổi + Lượt kiểm + Chênh lệch */}
         <div style={{ display: 'flex', gap: 8 }}>
           <div className="field-group" style={{ flex: 1 }}>
@@ -363,16 +374,6 @@ export default function KiemKe({ currentUser }) {
           <textarea className="input-field" value={ghiChu}
             onChange={e => setGhiChu(e.target.value)} placeholder="Nhập ghi chú..."
             rows={2} style={{ resize: 'vertical', lineHeight: 1.5 }} />
-        </div>
-
-        <div className="row-2col">
-          <button className="btn-secondary" onClick={handleHuy} disabled={saving}>
-            Hủy
-          </button>
-          <button className="btn-primary" onClick={handleLuu}
-            disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
-            {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
-          </button>
         </div>
 
         {/* Danh sách đã nhập */}
