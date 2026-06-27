@@ -20,24 +20,25 @@ async function downloadCSV(rows, cols, filename) {
     }).join(',')
   ).join('\n')
   const blob = new Blob(['﻿' + header + '\n' + body], { type: 'text/csv;charset=utf-8' })
-
-  // Mobile: dùng Web Share API để share trực tiếp qua Zalo, Drive...
   const file = new File([blob], filename, { type: 'text/csv' })
-  if (navigator.canShare?.({ files: [file] })) {
+
+  // Thử Web Share API (mobile: mở share sheet Zalo/Drive/...)
+  if (navigator.share) {
     try {
       await navigator.share({ files: [file], title: filename })
       return
     } catch (err) {
       if (err.name === 'AbortError') return // user bấm huỷ
+      // Không share được file → fallback download
     }
   }
 
-  // Desktop fallback: download bình thường
+  // Fallback: download (desktop hoặc browser không hỗ trợ share file)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename
   document.body.appendChild(a); a.click()
-  document.body.removeChild(a); URL.revokeObjectURL(url)
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url) }, 1000)
 }
 
 const getToday = () => new Date().toISOString().slice(0, 10)
