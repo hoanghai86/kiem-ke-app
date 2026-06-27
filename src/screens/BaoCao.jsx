@@ -307,6 +307,7 @@ export default function BaoCao() {
   if (detailItem) {
     const p = detailItem.phien_kiem_ke
     const isLocked = p?.xac_nhan_ke_toan || p?.xac_nhan_thu_kho
+    const canEdit = !isLocked && (currentUser.role === 'admin' || detailItem.nguoi_nhap_id === currentUser.id)
     return (
       <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
         <div className="topbar">
@@ -404,14 +405,14 @@ export default function BaoCao() {
               <button className="btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Đang lưu...' : 'Lưu'}
               </button>
-            ) : !isLocked ? (
+            ) : canEdit ? (
               <button className="btn-primary" onClick={() => setEditMode(true)}>
                 Sửa
               </button>
             ) : null}
           </div>
 
-          {!editMode && !isLocked && (
+          {!editMode && canEdit && (
             <button onClick={handleDelete} disabled={saving} style={{
               marginTop: 8, width: '100%',
               padding: '10px', borderRadius: 8, border: '1.5px solid #FCA5A5',
