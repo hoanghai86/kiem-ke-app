@@ -20,6 +20,7 @@ export default function BatDauPhien({ currentUser }) {
   // Mode: 'list' | 'create' | 'edit'
   const [mode, setMode] = useState('list')
   const [editPhien, setEditPhien] = useState(null)
+  const [editHasData, setEditHasData] = useState(false)
   const [form, setForm] = useState({ keToanId: '', thuKhoId: '', ngayKiem: TODAY, trangThai: 'dang_kiem' })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -183,7 +184,7 @@ export default function BatDauPhien({ currentUser }) {
   }
 
   // ── EDIT ─────────────────────────────────────────────────────────────
-  function openEdit(phien) {
+  async function openEdit(phien) {
     setEditPhien(phien)
     setForm({
       keToanId: phien.ke_toan_id,
@@ -192,6 +193,15 @@ export default function BatDauPhien({ currentUser }) {
       trangThai: phien.trang_thai
     })
     setFormError('')
+    let count = await db.chitiet.where('phien_id').equals(phien.id).count()
+    if (count === 0 && navigator.onLine) {
+      const { count: sc } = await supabase
+        .from('kiem_ke_chitiet')
+        .select('id', { count: 'exact', head: true })
+        .eq('phien_id', phien.id)
+      count = sc ?? 0
+    }
+    setEditHasData(count > 0)
     setMode('edit')
   }
 
@@ -312,8 +322,11 @@ export default function BatDauPhien({ currentUser }) {
 
           <div className="field-group">
             <label className="field-label">Kế toán</label>
-            {currentUser.role === 'ke_toan' ? (
-              <div className="input-readonly">{currentUser.ho_ten}</div>
+            {currentUser.role === 'ke_toan' || (isEdit && editHasData) ? (
+              <div className="input-readonly">
+                {danhMucKeToan.find(u => u.id === form.keToanId)?.ho_ten || currentUser.ho_ten}
+                {isEdit && editHasData && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>· đã có số liệu</span>}
+              </div>
             ) : (
               <select className="input-select" value={form.keToanId}
                 onChange={e => setForm(f => ({ ...f, keToanId: e.target.value }))}
@@ -326,8 +339,11 @@ export default function BatDauPhien({ currentUser }) {
 
           <div className="field-group">
             <label className="field-label">Thủ kho</label>
-            {currentUser.role === 'thu_kho' ? (
-              <div className="input-readonly">{currentUser.ho_ten}</div>
+            {currentUser.role === 'thu_kho' || (isEdit && editHasData) ? (
+              <div className="input-readonly">
+                {danhMucThuKho.find(u => u.id === form.thuKhoId)?.ho_ten || currentUser.ho_ten}
+                {isEdit && editHasData && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>· đã có số liệu</span>}
+              </div>
             ) : (
               <select className="input-select" value={form.thuKhoId}
                 onChange={e => setForm(f => ({ ...f, thuKhoId: e.target.value }))}
