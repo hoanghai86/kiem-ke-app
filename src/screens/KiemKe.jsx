@@ -29,6 +29,7 @@ export default function KiemKe({ currentUser }) {
   const [dvtChinhMap, setDvtChinhMap] = useState({}) // ma_vt → ma_dvt_chinh
   const loadedRef = useRef(false) // guard: chỉ persist sau khi load() xong
   const soLuongRef = useRef(null)
+  const phienRef   = useRef(null) // tránh closure stale khi đọc ke_toan_id
 
   // Danh sách đã nhập — filter + CRUD
   const [xemFilter, setXemFilter] = useState({ kho: '', vatTu: '', soLuong: '', dvt: '' })
@@ -54,6 +55,7 @@ export default function KiemKe({ currentUser }) {
     async function load() {
       const p = await db.phien.get(phienId)
       if (!p) return
+      phienRef.current = p
       setPhien(p)
 
       const [khos, doiTac, dvtList] = await Promise.all([
@@ -134,7 +136,11 @@ export default function KiemKe({ currentUser }) {
   async function loadDanhSach() {
     const rows = await db.chitiet
       .where('phien_id').equals(phienId)
-      .filter(r => r.nguoi_nhap_id === currentUser.id)
+      .filter(r => {
+        const keToanId = phienRef.current?.ke_toan_id
+        if (currentUser.role === 'admin') return r.nguoi_nhap_id === keToanId
+        return r.nguoi_nhap_id === currentUser.id
+      })
       .sortBy('created_at')
     setDanhSach(rows.reverse())
   }
@@ -174,7 +180,9 @@ export default function KiemKe({ currentUser }) {
       ghi_chu: ghiChu,
       hinh_anh_urls: [],
       da_doi_chieu: false,
-      nguoi_nhap_id: currentUser.id
+      nguoi_nhap_id: currentUser.role === 'admin'
+        ? (phienRef.current?.ke_toan_id ?? currentUser.id)
+        : currentUser.id
     })
 
     if (navigator.onLine) pushOfflineQueue()
