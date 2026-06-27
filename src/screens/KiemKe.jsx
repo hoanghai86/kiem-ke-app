@@ -260,9 +260,9 @@ export default function KiemKe({ currentUser }) {
         </div>
       </div>
 
-      {/* Lưu / Hủy — sticky dưới topbar, luôn hiện dù bàn phím mobile bật */}
+      {/* Lưu / Hủy — sticky ngay dưới topbar (topbar cao ~72px) */}
       <div style={{
-        position: 'sticky', top: 0, zIndex: 9,
+        position: 'sticky', top: 72, zIndex: 9,
         background: '#fff', borderBottom: '1px solid var(--border)',
         padding: '8px 16px', display: 'flex', gap: 8
       }}>
