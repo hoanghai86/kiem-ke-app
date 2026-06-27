@@ -5,14 +5,15 @@ import { db, toggleDoiChieu, updateChiTiet, deleteChiTiet } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue } from '../lib/sync'
 
-function buildSummaryData(rows, ktId, tkId, adminIds = new Set()) {
+function buildSummaryData(rows, ktId, tkId, roleMap = {}) {
   const grouped = {}
   rows.forEach(r => {
     if (!grouped[r.ma_vt]) {
       grouped[r.ma_vt] = { ma_vt: r.ma_vt, ten_vt: r.ten_vt, rowsKT: [], rowsTK: [] }
     }
-    if (r.nguoi_nhap_id === ktId || adminIds.has(r.nguoi_nhap_id)) grouped[r.ma_vt].rowsKT.push(r)
-    else if (r.nguoi_nhap_id === tkId) grouped[r.ma_vt].rowsTK.push(r)
+    const rl = roleMap[r.nguoi_nhap_id]
+    if (rl === 'ke_toan' || rl === 'admin') grouped[r.ma_vt].rowsKT.push(r)
+    else if (rl === 'thu_kho') grouped[r.ma_vt].rowsTK.push(r)
   })
   return Object.values(grouped).map(g => {
     const slKT = g.rowsKT.reduce((s, r) => s + (r.so_luong_quy_doi ?? 0), 0)
@@ -58,12 +59,12 @@ export default function DemLai({ currentUser }) {
   const [editMode, setEditMode] = useState(false)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
-  const [adminIdSet, setAdminIdSet] = useState(new Set())
+  const [roleMap, setRoleMap] = useState({})
 
   useEffect(() => { load() }, [phienId])
 
-  function buildSummary(rows, ktId, tkId, adminIds = new Set()) {
-    const summary = buildSummaryData(rows, ktId, tkId, adminIds)
+  function buildSummary(rows, ktId, tkId, rm = {}) {
+    const summary = buildSummaryData(rows, ktId, tkId, rm)
     setSummaryRows(summary)
     return summary
   }
@@ -134,10 +135,10 @@ export default function DemLai({ currentUser }) {
     }
     setPhienPeople(people)
     setAdminViewId(prev => prev || (isAdmin ? p?.ke_toan_id : null))
-    const adminUsers = await db.dm_user.where('role').equals('admin').toArray()
-    const localAdminSet = new Set(adminUsers.map(u => u.id))
-    setAdminIdSet(localAdminSet)
-    buildSummary(rows, p?.ke_toan_id, p?.thu_kho_id, localAdminSet)
+    const allUsers = await db.dm_user.toArray()
+    const localRoleMap = Object.fromEntries(allUsers.map(u => [u.id, u.role]))
+    setRoleMap(localRoleMap)
+    buildSummary(rows, p?.ke_toan_id, p?.thu_kho_id, localRoleMap)
     setLoading(false)
   }
 
@@ -178,7 +179,7 @@ export default function DemLai({ currentUser }) {
     const newVal = !item.da_doi_chieu
     const updatedRows = allRows.map(r => r.id === item.id ? { ...r, da_doi_chieu: newVal } : r)
     setAllRows(updatedRows)
-    buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, adminIdSet)
+    buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, roleMap)
     await toggleDoiChieu(item.id, newVal)
     if (navigator.onLine) pushOfflineQueue()
   }
@@ -186,7 +187,7 @@ export default function DemLai({ currentUser }) {
   async function handleDeleteRecord(item) {
     const updatedRows = allRows.filter(r => r.id !== item.id)
     setAllRows(updatedRows)
-    buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, adminIdSet)
+    buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, roleMap)
     await deleteChiTiet(item.id)
     if (navigator.onLine) pushOfflineQueue()
   }
@@ -207,7 +208,7 @@ export default function DemLai({ currentUser }) {
     const ids = new Set(userRows.map(r => r.id))
     const updatedRows = allRows.map(r => ids.has(r.id) ? { ...r, da_doi_chieu: newVal } : r)
     setAllRows(updatedRows)
-    buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, adminIdSet)
+    buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, roleMap)
     if (navigator.onLine) pushOfflineQueue()
   }
 
@@ -239,7 +240,7 @@ export default function DemLai({ currentUser }) {
     if (updated) {
       const updatedRows = allRows.map(r => r.id === updated.id ? updated : r)
       setAllRows(updatedRows)
-      buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, adminIdSet)
+      buildSummary(updatedRows, phienPeople?.ktId, phienPeople?.tkId, roleMap)
     }
     if (navigator.onLine) pushOfflineQueue()
     setSaving(false)
@@ -458,7 +459,7 @@ export default function DemLai({ currentUser }) {
 
   // Tính summary từ rows đã lọc (đảm bảo tổng KT/TK phản ánh đúng bộ lọc)
   const filteredSummary = phienPeople
-    ? buildSummaryData(filteredBaseRows, phienPeople.ktId, phienPeople.tkId, adminIdSet)
+    ? buildSummaryData(filteredBaseRows, phienPeople.ktId, phienPeople.tkId, roleMap)
     : []
 
   // Lọc theo mã/tên vật tư (text search)

@@ -18,7 +18,7 @@ export default function TongHop({ currentUser }) {
   const [detailGroup, setDetailGroup] = useState(null)
   const [saving, setSaving]         = useState(false)
   const [tab, setTab]               = useState('chenh')
-  const [adminIdSet, setAdminIdSet] = useState(new Set())
+  const [roleMap, setRoleMap]       = useState({})
 
   useEffect(() => { load() }, [phienId])
 
@@ -71,9 +71,9 @@ export default function TongHop({ currentUser }) {
       }
     }
 
-    const adminUsers = await db.dm_user.where('role').equals('admin').toArray()
-    const localAdminSet = new Set(adminUsers.map(u => u.id))
-    setAdminIdSet(localAdminSet)
+    const allUsers = await db.dm_user.toArray()
+    const localRoleMap = Object.fromEntries(allUsers.map(u => [u.id, u.role]))
+    setRoleMap(localRoleMap)
 
     const ma_kho      = phienData?.ma_kho
     const ke_toan_id  = phienData?.ke_toan_id
@@ -92,8 +92,8 @@ export default function TongHop({ currentUser }) {
       const maDvtC    = cMap[ma_vt]
       const tenDvtC   = maDvtC ? (dMap[maDvtC] || maDvtC) : ''
 
-      const ktRows = group.rows.filter(r => r.nguoi_nhap_id === ke_toan_id || localAdminSet.has(r.nguoi_nhap_id))
-      const tkRows = group.rows.filter(r => r.nguoi_nhap_id === thu_kho_id)
+      const ktRows = group.rows.filter(r => { const rl = localRoleMap[r.nguoi_nhap_id]; return rl === 'ke_toan' || rl === 'admin' })
+      const tkRows = group.rows.filter(r => localRoleMap[r.nguoi_nhap_id] === 'thu_kho')
 
       const ktTong = ktRows.reduce((s, r) => s + (r.so_luong_quy_doi ?? r.so_luong_thuc_te ?? 0), 0)
       const tkTong = tkRows.reduce((s, r) => s + (r.so_luong_quy_doi ?? r.so_luong_thuc_te ?? 0), 0)
@@ -121,8 +121,8 @@ export default function TongHop({ currentUser }) {
         khop_nhau: khopNhau, chenh_ss: chenhSS,
         kt_co_data: ktCoData, tk_co_data: tkCoData,
         rows: group.rows.sort((a, b) => {
-          const aKT = a.nguoi_nhap_id === ke_toan_id || localAdminSet.has(a.nguoi_nhap_id)
-          const bKT = b.nguoi_nhap_id === ke_toan_id || localAdminSet.has(b.nguoi_nhap_id)
+          const aRole = localRoleMap[a.nguoi_nhap_id]; const aKT = aRole === 'ke_toan' || aRole === 'admin'
+          const bRole = localRoleMap[b.nguoi_nhap_id]; const bKT = bRole === 'ke_toan' || bRole === 'admin'
           if (aKT && !bKT) return -1
           if (!aKT && bKT) return 1
           return a.luot_kiem - b.luot_kiem
@@ -227,8 +227,9 @@ export default function TongHop({ currentUser }) {
               </thead>
               <tbody>
                 {rows.map(r => {
-                  const isKT = r.nguoi_nhap_id === phien?.ke_toan_id || adminIdSet.has(r.nguoi_nhap_id)
-                  const isTK = r.nguoi_nhap_id === phien?.thu_kho_id && !adminIdSet.has(r.nguoi_nhap_id)
+                  const rl = roleMap[r.nguoi_nhap_id]
+                  const isKT = rl === 'ke_toan' || rl === 'admin'
+                  const isTK = rl === 'thu_kho'
                   const lbl  = isKT ? 'KT' : isTK ? 'TK' : '?'
                   return (
                     <tr key={r.id}>

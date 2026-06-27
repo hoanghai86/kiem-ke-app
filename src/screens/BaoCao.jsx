@@ -200,10 +200,10 @@ export default function BaoCao() {
   const afterRole = data.filter(r => {
     const p = r.phien_kiem_ke
     if (!p) return false
-    const isAdmin = userMap[r.nguoi_nhap_id]?.role === 'admin'
+    const role = userMap[r.nguoi_nhap_id]?.role
     return f.loaiDuLieu === 'ke_toan'
-      ? (r.nguoi_nhap_id === p.ke_toan_id || isAdmin)
-      : r.nguoi_nhap_id === p.thu_kho_id
+      ? (role === 'ke_toan' || role === 'admin')
+      : role === 'thu_kho'
   })
 
   const kw = f.vatTu.trim().toLowerCase()
@@ -233,9 +233,9 @@ export default function BaoCao() {
         }
       }
       const sl = parseFloat(r.so_luong_quy_doi) || 0
-      const isAdminRow = userMap[r.nguoi_nhap_id]?.role === 'admin'
-      if (r.nguoi_nhap_id === p.ke_toan_id || isAdminRow) map[key].sl_kt = (map[key].sl_kt ?? 0) + sl
-      if (r.nguoi_nhap_id === p.thu_kho_id) map[key].sl_tk = (map[key].sl_tk ?? 0) + sl
+      const role = userMap[r.nguoi_nhap_id]?.role
+      if (role === 'ke_toan' || role === 'admin') map[key].sl_kt = (map[key].sl_kt ?? 0) + sl
+      if (role === 'thu_kho') map[key].sl_tk = (map[key].sl_tk ?? 0) + sl
     })
     return Object.values(map)
       .filter(r => {
