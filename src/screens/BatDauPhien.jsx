@@ -228,7 +228,14 @@ export default function BatDauPhien({ currentUser }) {
 
   // ── DELETE ───────────────────────────────────────────────────────────
   async function handleDelete(phien) {
-    const soChiTiet = await db.chitiet.where('phien_id').equals(phien.id).count()
+    let soChiTiet = await db.chitiet.where('phien_id').equals(phien.id).count()
+    if (soChiTiet === 0 && navigator.onLine) {
+      const { count } = await supabase
+        .from('kiem_ke_chitiet')
+        .select('id', { count: 'exact', head: true })
+        .eq('phien_id', phien.id)
+      soChiTiet = count ?? 0
+    }
     if (soChiTiet > 0) {
       showToast(`Không thể xóa — phiên này đã có ${soChiTiet} dòng số liệu`)
       return
