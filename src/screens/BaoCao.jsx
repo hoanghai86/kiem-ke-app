@@ -49,7 +49,7 @@ const INIT_FILTERS = () => ({
   kho: 'all', phien: 'all', keToan: 'all', thuKho: 'all', vatTu: '',
 })
 
-export default function BaoCao() {
+export default function BaoCao({ currentUser }) {
   const [tab, setTab]             = useState('kiem_ke')
   const [f, setF]                 = useState(INIT_FILTERS)
   const [khoList, setKhoList]     = useState([])

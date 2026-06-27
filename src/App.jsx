@@ -72,7 +72,7 @@ export default function App() {
         <Route path="/admin" element={user?.role === 'admin' ? <Admin /> : <Navigate to="/" />} />
         <Route path="/danh-muc" element={user?.role === 'admin' ? <DanhMuc /> : <Navigate to="/" />} />
         <Route path="/account" element={user ? <Account currentUser={user} onUpdate={setUser} /> : <Navigate to="/login" />} />
-        <Route path="/bao-cao" element={user ? <BaoCao /> : <Navigate to="/login" />} />
+        <Route path="/bao-cao" element={user ? <BaoCao currentUser={user} /> : <Navigate to="/login" />} />
       </Routes>
 
       {/* Sync FAB + Bottom nav — chỉ show khi đã login */}
