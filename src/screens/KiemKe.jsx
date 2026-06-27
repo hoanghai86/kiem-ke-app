@@ -28,6 +28,7 @@ export default function KiemKe({ currentUser }) {
   const [danhMucDvt, setDanhMucDvt] = useState([])
   const [dvtChinhMap, setDvtChinhMap] = useState({}) // ma_vt → ma_dvt_chinh
   const loadedRef = useRef(false) // guard: chỉ persist sau khi load() xong
+  const soLuongRef = useRef(null)
 
   // Persist kho + vatTu sang sessionStorage để nhớ khi quay lại
   useEffect(() => {
@@ -138,6 +139,7 @@ export default function KiemKe({ currentUser }) {
       setSoSach(ss)
       if (dvtChinhMap[vt.ma_vt]) setDvt(dvtChinhMap[vt.ma_vt])
       setHeSo(1)
+      setTimeout(() => soLuongRef.current?.focus(), 100)
     } else {
       setDvt('')
       setHeSo(1)
@@ -173,6 +175,7 @@ export default function KiemKe({ currentUser }) {
     setSoLuong('')
     setGhiChu('')
     setSaving(false)
+    setTimeout(() => soLuongRef.current?.focus(), 100)
   }
 
   function handleHuy() {
@@ -332,9 +335,10 @@ export default function KiemKe({ currentUser }) {
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Số lượng thực tế</label>
             <input
+              ref={soLuongRef}
               type="number" className="input-field input-large"
               value={soLuong} onChange={e => setSoLuong(e.target.value)}
-              placeholder="0" min="0" step="any" autoFocus
+              placeholder="0" min="0" step="any"
             />
           </div>
           <div className="field-group" style={{ flex: 1 }}>
