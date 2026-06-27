@@ -268,7 +268,7 @@ export default function KiemKe({ currentUser }) {
           Hủy
         </button>
         <button className="btn-primary" onClick={handleLuu}
-          style={{ flex: 2, height: 40 }}
+          style={{ flex: 1, height: 40 }}
           disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
           {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
         </button>
