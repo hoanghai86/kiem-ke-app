@@ -1,7 +1,7 @@
 // src/screens/KiemKe.jsx
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { db, saveChiTietLocal, getSoSach } from '../lib/db'
+import { db, saveChiTietLocal, getSoSach, deleteChiTiet, updateChiTiet } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue } from '../lib/sync'
 import ChonVatTu from '../components/ChonVatTu'
@@ -29,6 +29,13 @@ export default function KiemKe({ currentUser }) {
   const [dvtChinhMap, setDvtChinhMap] = useState({}) // ma_vt → ma_dvt_chinh
   const loadedRef = useRef(false) // guard: chỉ persist sau khi load() xong
   const soLuongRef = useRef(null)
+
+  // Danh sách đã nhập — filter + CRUD
+  const [xemFilter, setXemFilter] = useState({ kho: '', vatTu: '', soLuong: '', dvt: '' })
+  const [showListFilter, setShowListFilter] = useState(false)
+  const [editItem, setEditItem] = useState(null)
+  const [editForm, setEditForm] = useState({})
+  const [editSaving, setEditSaving] = useState(false)
 
   // Persist kho + vatTu sang sessionStorage để nhớ khi quay lại
   useEffect(() => {
@@ -184,6 +191,35 @@ export default function KiemKe({ currentUser }) {
     setGhiChu('')
   }
 
+  async function handleDeleteItem(id) {
+    if (!window.confirm('Xóa dòng này?')) return
+    await deleteChiTiet(id)
+    if (navigator.onLine) pushOfflineQueue()
+    await loadDanhSach()
+  }
+
+  async function handleDeleteAll() {
+    if (!window.confirm(`Xóa tất cả ${danhSach.length} dòng đã nhập?`)) return
+    for (const item of danhSach) await deleteChiTiet(item.id)
+    if (navigator.onLine) pushOfflineQueue()
+    await loadDanhSach()
+  }
+
+  async function handleUpdateItem() {
+    if (!editItem) return
+    setEditSaving(true)
+    await updateChiTiet(editItem.id, {
+      so_luong_thuc_te: parseFloat(editForm.so_luong_thuc_te),
+      ma_dvt_kiem: editForm.ma_dvt_kiem,
+      he_so_quy_doi: parseFloat(editForm.he_so_quy_doi) || 1,
+      ghi_chu: editForm.ghi_chu
+    })
+    if (navigator.onLine) pushOfflineQueue()
+    await loadDanhSach()
+    setEditSaving(false)
+    setEditItem(null)
+  }
+
   const vtHienTai = vatTuCoDinh
   const dvtChinh = vtHienTai ? (dvtChinhMap[vtHienTai.ma_vt] || '') : ''
   const soQuyDoi = soLuong ? (parseFloat(soLuong) * (parseFloat(heSo) || 1)).toFixed(3) : null
@@ -230,26 +266,148 @@ export default function KiemKe({ currentUser }) {
   // Lọc danh sách theo chế độ 1 mã
   const danhSachHienThi = danhSach.slice(0, 20)
 
-  if (xemDanhSach) return (
-    <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-      <div className="topbar">
-        <div className="topbar-title">Danh sách đã nhập</div>
-        <div className="topbar-sub">{danhSach.length} dòng · Lượt {luotKiem}</div>
-      </div>
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: '#fff' }}>
-        <button className="btn-secondary" onClick={() => setXemDanhSach(false)}
-          style={{ width: '100%', color: 'var(--green-dark)', borderColor: 'var(--green)', fontWeight: 600 }}>
-          ← Quay lại nhập liệu
-        </button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
-        {danhSach.map(item => renderItemRow(item))}
-        {danhSach.length === 0 && (
-          <div className="empty-state">Chưa có dòng nào được nhập</div>
+  if (xemDanhSach) {
+    const hasFilter = !!(xemFilter.kho || xemFilter.vatTu || xemFilter.soLuong || xemFilter.dvt)
+    const danhSachLoc = danhSach
+      .filter(r => !xemFilter.kho || r.ma_kho === xemFilter.kho)
+      .filter(r => !xemFilter.vatTu || r.ma_vt.toLowerCase().includes(xemFilter.vatTu.toLowerCase()) || r.ten_vt.toLowerCase().includes(xemFilter.vatTu.toLowerCase()))
+      .filter(r => !xemFilter.soLuong || String(r.so_luong_thuc_te) === xemFilter.soLuong)
+      .filter(r => !xemFilter.dvt || r.ma_dvt_kiem === xemFilter.dvt)
+
+    return (
+      <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <div className="topbar">
+          <div className="topbar-title">Danh sách đã nhập</div>
+          <div className="topbar-sub">{danhSachLoc.length}/{danhSach.length} dòng · Lượt {luotKiem}</div>
+        </div>
+
+        {/* Toolbar */}
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', gap: 8 }}>
+          <button className="btn-secondary" onClick={() => setXemDanhSach(false)}
+            style={{ flex: 1, color: 'var(--green-dark)', borderColor: 'var(--green)', fontWeight: 600, height: 36 }}>
+            ← Quay lại
+          </button>
+          <button className="btn-filter-toggle" onClick={() => setShowListFilter(v => !v)}
+            style={{ height: 36 }}>
+            Lọc {hasFilter ? '●' : ''}{showListFilter ? ' ▲' : ' ▼'}
+          </button>
+          {danhSach.length > 0 && (
+            <button onClick={handleDeleteAll}
+              style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 600, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+              Xóa tất cả
+            </button>
+          )}
+        </div>
+
+        {/* Filter panel */}
+        {showListFilter && (
+          <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', background: '#F9FAFB', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div className="field-label">Kho</div>
+                <select className="input-select" value={xemFilter.kho}
+                  onChange={e => setXemFilter(f => ({ ...f, kho: e.target.value }))}>
+                  <option value="">Tất cả</option>
+                  {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="field-label">ĐVT phụ</div>
+                <select className="input-select" value={xemFilter.dvt}
+                  onChange={e => setXemFilter(f => ({ ...f, dvt: e.target.value }))}>
+                  <option value="">Tất cả</option>
+                  {danhMucDvt.map(d => <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 2 }}>
+                <div className="field-label">Mã / tên vật tư</div>
+                <input className="input-field" value={xemFilter.vatTu}
+                  onChange={e => setXemFilter(f => ({ ...f, vatTu: e.target.value }))}
+                  placeholder="Tìm mã hoặc tên..." />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="field-label">Số lượng</div>
+                <input className="input-field" type="number" value={xemFilter.soLuong}
+                  onChange={e => setXemFilter(f => ({ ...f, soLuong: e.target.value }))}
+                  placeholder="VD: 5" min="0" />
+              </div>
+            </div>
+            {hasFilter && (
+              <button className="btn-clear-filter"
+                onClick={() => setXemFilter({ kho: '', vatTu: '', soLuong: '', dvt: '' })}>
+                Xóa lọc
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Danh sách */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px' }}>
+          {danhSachLoc.length === 0 && (
+            <div className="empty-state">{hasFilter ? 'Không có kết quả phù hợp' : 'Chưa có dòng nào được nhập'}</div>
+          )}
+          {danhSachLoc.map(item => (
+            <div key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+              {renderItemRow(item)}
+              <div style={{ display: 'flex', gap: 0, marginTop: -4, marginBottom: 8 }}>
+                <button onClick={() => { setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '' }) }}
+                  style={{ flex: 1, padding: '6px', fontSize: 13, border: '1px solid var(--border)', borderRight: 'none', borderRadius: '6px 0 0 6px', background: '#fff', color: '#1a56db', cursor: 'pointer', fontWeight: 500 }}>
+                  Sửa
+                </button>
+                <button onClick={() => handleDeleteItem(item.id)}
+                  style={{ flex: 1, padding: '6px', fontSize: 13, border: '1px solid #FCA5A5', borderRadius: '0 6px 6px 0', background: '#FEF2F2', color: '#DC2626', cursor: 'pointer', fontWeight: 500 }}>
+                  Xóa
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Edit modal */}
+        {editItem && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'flex-end' }}>
+            <div style={{ background: '#fff', width: '100%', maxWidth: 480, margin: '0 auto', borderRadius: '16px 16px 0 0', padding: '20px 16px 32px' }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>
+                Sửa · {editItem.ma_vt} · {editItem.ten_vt}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Số lượng</label>
+                  <input type="number" className="input-field input-large" value={editForm.so_luong_thuc_te}
+                    onChange={e => setEditForm(f => ({ ...f, so_luong_thuc_te: e.target.value }))} min="0" step="any" />
+                </div>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">ĐVT</label>
+                  <select className="input-select" value={editForm.ma_dvt_kiem}
+                    onChange={e => setEditForm(f => ({ ...f, ma_dvt_kiem: e.target.value }))}>
+                    {danhMucDvt.map(d => <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>)}
+                  </select>
+                </div>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Hệ số</label>
+                  <input type="number" className="input-field" value={editForm.he_so_quy_doi}
+                    onChange={e => setEditForm(f => ({ ...f, he_so_quy_doi: e.target.value }))} min="0" step="any" />
+                </div>
+              </div>
+              <div className="field-group" style={{ marginBottom: 14 }}>
+                <label className="field-label">Ghi chú</label>
+                <input type="text" className="input-field" value={editForm.ghi_chu}
+                  onChange={e => setEditForm(f => ({ ...f, ghi_chu: e.target.value }))} placeholder="Ghi chú..." />
+              </div>
+              <div className="row-2col">
+                <button className="btn-secondary" onClick={() => setEditItem(null)} disabled={editSaving}>Hủy</button>
+                <button className="btn-primary" onClick={handleUpdateItem} disabled={editSaving}>
+                  {editSaving ? 'Đang lưu...' : 'Lưu'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
-    </div>
-  )
+    )
+  }
 
   return (
     <div className="screen">
