@@ -54,7 +54,11 @@ export default function KiemKe({ currentUser }) {
   useEffect(() => {
     async function load() {
       const p = await db.phien.get(phienId)
-      if (!p) return
+      if (!p) { navigate('/'); return }
+      const authorized = currentUser.role === 'admin'
+        || p.ke_toan_id === currentUser.id
+        || p.thu_kho_id === currentUser.id
+      if (!authorized) { navigate('/'); return }
       phienRef.current = p
       setPhien(p)
 

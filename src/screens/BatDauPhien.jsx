@@ -109,7 +109,10 @@ export default function BatDauPhien({ currentUser }) {
     setUserMap(uMap)
     setLoadingDM(false)
 
-    const rows = await db.phien.toArray()
+    let rows = await db.phien.toArray()
+    if (currentUser.role !== 'admin') {
+      rows = rows.filter(r => r.ke_toan_id === currentUser.id || r.thu_kho_id === currentUser.id)
+    }
     rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     setPhienList(rows)
     setLoading(false)
