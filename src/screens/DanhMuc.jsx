@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { pullDanhMuc } from '../lib/sync'
+import * as XLSX from 'xlsx'
 
 const TABS = [
   { key: 'kho',    label: 'Kho' },
@@ -30,24 +31,26 @@ export default function DanhMuc({ inline = false }) {
   const [importing, setImporting]   = useState(false)
   const importRef = useRef(null)
 
+  const toActive = v => String(v ?? '1').trim() !== '0'
+
   const TAB_CFG = {
     kho: {
       table: 'dm_kho', key: 'ma_kho',
       headers: ['ma_kho', 'ten_kho', 'active'],
-      getRow: r => [r.ma_kho, r.ten_kho, r.active ? '1' : '0'],
-      toPayload: cols => ({ ma_kho: cols[0]?.trim().toUpperCase(), ten_kho: cols[1]?.trim(), active: !['0','false',''].includes((cols[2]||'1').trim().toLowerCase()) }),
+      getRow: r => [r.ma_kho, r.ten_kho, r.active ? 1 : 0],
+      toPayload: cols => ({ ma_kho: String(cols[0]||'').trim().toUpperCase(), ten_kho: String(cols[1]||'').trim(), active: toActive(cols[2]) }),
     },
     dvt: {
       table: 'dm_dvt', key: 'ma_dvt',
       headers: ['ma_dvt', 'ten_dvt', 'active'],
-      getRow: r => [r.ma_dvt, r.ten_dvt, r.active ? '1' : '0'],
-      toPayload: cols => ({ ma_dvt: cols[0]?.trim().toUpperCase(), ten_dvt: cols[1]?.trim(), active: !['0','false',''].includes((cols[2]||'1').trim().toLowerCase()) }),
+      getRow: r => [r.ma_dvt, r.ten_dvt, r.active ? 1 : 0],
+      toPayload: cols => ({ ma_dvt: String(cols[0]||'').trim().toUpperCase(), ten_dvt: String(cols[1]||'').trim(), active: toActive(cols[2]) }),
     },
     vat_tu: {
       table: 'dm_vat_tu', key: 'ma_vt',
       headers: ['ma_vt', 'ten_vt', 'ma_dvt_chinh', 'active'],
-      getRow: r => [r.ma_vt, r.ten_vt, r.ma_dvt_chinh || '', r.active ? '1' : '0'],
-      toPayload: cols => ({ ma_vt: cols[0]?.trim().toUpperCase(), ten_vt: cols[1]?.trim(), ma_dvt_chinh: cols[2]?.trim() || null, active: !['0','false',''].includes((cols[3]||'1').trim().toLowerCase()) }),
+      getRow: r => [r.ma_vt, r.ten_vt, r.ma_dvt_chinh || '', r.active ? 1 : 0],
+      toPayload: cols => ({ ma_vt: String(cols[0]||'').trim().toUpperCase(), ten_vt: String(cols[1]||'').trim(), ma_dvt_chinh: String(cols[2]||'').trim() || null, active: toActive(cols[3]) }),
     },
   }
 
@@ -156,52 +159,30 @@ export default function DanhMuc({ inline = false }) {
     setList(prev => prev.map(r => r.id === item.id ? { ...r, active: !item.active } : r))
   }
 
-  function parseCSVLine(line) {
-    const result = []; let cur = ''; let inQ = false
-    for (let i = 0; i < line.length; i++) {
-      if (line[i] === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++ } else inQ = !inQ }
-      else if (line[i] === ',' && !inQ) { result.push(cur); cur = '' }
-      else cur += line[i]
-    }
-    result.push(cur); return result
-  }
-
-  async function handleExport() {
+  function handleExport() {
     const cfg = TAB_CFG[tab]
-    const csvRows = list.map(r => cfg.getRow(r).map(v => {
-      const s = String(v ?? '')
-      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g,'""')}"` : s
-    }).join(','))
-    const csv = '﻿' + [cfg.headers.join(','), ...csvRows].join('\n')
-    const toLocalDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
-    const filename = `DanhMuc_${tab}_${toLocalDate()}.csv`
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-    const file = new File([blob], filename, { type: 'text/csv' })
-    if (navigator.share) {
-      try { await navigator.share({ files: [file], title: filename }); return }
-      catch (e) { if (e.name === 'AbortError') return }
-    }
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename
-    document.body.appendChild(a); a.click()
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url) }, 1000)
+    const ws = XLSX.utils.aoa_to_sheet([cfg.headers, ...list.map(r => cfg.getRow(r))])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, tab)
+    const d = new Date()
+    const dateStr = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`
+    XLSX.writeFile(wb, `DanhMuc_${tab}_${dateStr}.xlsx`)
   }
 
   async function handleImport(e) {
     const file = e.target.files?.[0]; if (!file) return
     e.target.value = ''
-    const text = (await file.text()).replace(/^﻿/, '')
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-    if (lines.length < 2) { setErr('File CSV không có dữ liệu'); return }
     const cfg = TAB_CFG[tab]
-    const payloads = lines.slice(1)
-      .map(l => parseCSVLine(l))
-      .filter(cols => cols[0]?.trim())
-      .map(cols => cfg.toPayload(cols))
-    if (!payloads.length) { setErr('Không có dòng hợp lệ'); return }
     setImporting(true); setErr('')
     try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 })
+      const payloads = rows.slice(1)
+        .filter(r => r[0])
+        .map(r => cfg.toPayload(r))
+      if (!payloads.length) { setErr('Không có dòng hợp lệ'); return }
       const { error } = await supabase.from(cfg.table).upsert(payloads, { onConflict: cfg.key })
       if (error) throw new Error(error.message)
       await loadList(); await pullDanhMuc()
@@ -353,7 +334,7 @@ export default function DanhMuc({ inline = false }) {
             {importing ? 'Đang import...' : '⬆ Import CSV'}
           </button>
         </div>
-        <input ref={importRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleImport} />
+        <input ref={importRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImport} />
 
         <input className="input-field" placeholder="Tìm kiếm..." value={search}
           onChange={e => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
