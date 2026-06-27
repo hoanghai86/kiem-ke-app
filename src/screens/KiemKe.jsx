@@ -92,7 +92,6 @@ export default function KiemKe({ currentUser }) {
           try {
             const vt = JSON.parse(savedVt)
             setVatTuCoDinh(vt)
-            setVatTu(vt)
             const ss = await getSoSach(vt.ma_vt, savedKho)
             setSoSach(ss)
             if (localDvtMap[vt.ma_vt]) setDvt(localDvtMap[vt.ma_vt])
@@ -134,7 +133,6 @@ export default function KiemKe({ currentUser }) {
   // Chọn mã vật tư
   async function handleChonVatTuCoDinh(vt) {
     setVatTuCoDinh(vt)
-    setVatTu(vt)
     if (vt) {
       const ss = maKhoHienTai ? await getSoSach(vt.ma_vt, maKhoHienTai) : null
       setSoSach(ss)
