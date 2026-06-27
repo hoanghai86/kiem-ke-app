@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm start *)",
+      "PowerShell(netstat *)",
+      "PowerShell(Start-Process \"http://localhost:3000\")"
+    ]
+  }
+}
