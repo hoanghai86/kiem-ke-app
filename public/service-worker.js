@@ -1,5 +1,5 @@
 // public/service-worker.js
-const CACHE_NAME = 'kiem-ke-v2'
+const CACHE_NAME = 'kiem-ke-v3'
 
 // Chỉ pre-cache các file có tên cố định — JS/CSS/chunk có hash sẽ được cache động khi fetch
 const STATIC_ASSETS = [
