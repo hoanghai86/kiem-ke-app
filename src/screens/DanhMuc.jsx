@@ -3,7 +3,6 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { pullDanhMuc } from '../lib/sync'
-import * as XLSX from 'xlsx'
 
 const TABS = [
   { key: 'kho',    label: 'Kho' },
@@ -37,19 +36,19 @@ export default function DanhMuc({ inline = false }) {
     kho: {
       table: 'dm_kho', key: 'ma_kho',
       headers: ['ma_kho', 'ten_kho', 'active'],
-      getRow: r => [r.ma_kho, r.ten_kho, r.active ? 1 : 0],
+      getRow: r => [r.ma_kho, r.ten_kho, r.active ? '1' : '0'],
       toPayload: cols => ({ ma_kho: String(cols[0]||'').trim().toUpperCase(), ten_kho: String(cols[1]||'').trim(), active: toActive(cols[2]) }),
     },
     dvt: {
       table: 'dm_dvt', key: 'ma_dvt',
       headers: ['ma_dvt', 'ten_dvt', 'active'],
-      getRow: r => [r.ma_dvt, r.ten_dvt, r.active ? 1 : 0],
+      getRow: r => [r.ma_dvt, r.ten_dvt, r.active ? '1' : '0'],
       toPayload: cols => ({ ma_dvt: String(cols[0]||'').trim().toUpperCase(), ten_dvt: String(cols[1]||'').trim(), active: toActive(cols[2]) }),
     },
     vat_tu: {
       table: 'dm_vat_tu', key: 'ma_vt',
       headers: ['ma_vt', 'ten_vt', 'ma_dvt_chinh', 'active'],
-      getRow: r => [r.ma_vt, r.ten_vt, r.ma_dvt_chinh || '', r.active ? 1 : 0],
+      getRow: r => [r.ma_vt, r.ten_vt, r.ma_dvt_chinh || '', r.active ? '1' : '0'],
       toPayload: cols => ({ ma_vt: String(cols[0]||'').trim().toUpperCase(), ten_vt: String(cols[1]||'').trim(), ma_dvt_chinh: String(cols[2]||'').trim() || null, active: toActive(cols[3]) }),
     },
   }
@@ -161,12 +160,19 @@ export default function DanhMuc({ inline = false }) {
 
   function handleExport() {
     const cfg = TAB_CFG[tab]
-    const ws = XLSX.utils.aoa_to_sheet([cfg.headers, ...list.map(r => cfg.getRow(r))])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, tab)
+    const rows = list.map(r => cfg.getRow(r).map(v => {
+      const s = String(v ?? '')
+      return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g,'""')}"` : s
+    }).join(','))
+    const csv = '﻿' + [cfg.headers.join(','), ...rows].join('\n')
     const d = new Date()
     const dateStr = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`
-    XLSX.writeFile(wb, `DanhMuc_${tab}_${dateStr}.xlsx`)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `DanhMuc_${tab}_${dateStr}.csv`
+    document.body.appendChild(a); a.click()
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href) }, 1000)
   }
 
   async function handleImport(e) {
@@ -175,13 +181,19 @@ export default function DanhMuc({ inline = false }) {
     const cfg = TAB_CFG[tab]
     setImporting(true); setErr('')
     try {
-      const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf)
-      const ws = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 })
-      const payloads = rows.slice(1)
-        .filter(r => r[0])
-        .map(r => cfg.toPayload(r))
+      const text = (await file.text()).replace(/^﻿/, '')
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+      if (lines.length < 2) { setErr('File không có dữ liệu'); return }
+      const parseCSV = line => {
+        const res = []; let cur = ''; let inQ = false
+        for (let i = 0; i < line.length; i++) {
+          if (line[i] === '"') { if (inQ && line[i+1] === '"') { cur += '"'; i++ } else inQ = !inQ }
+          else if (line[i] === ',' && !inQ) { res.push(cur); cur = '' }
+          else cur += line[i]
+        }
+        res.push(cur); return res
+      }
+      const payloads = lines.slice(1).map(parseCSV).filter(c => c[0]?.trim()).map(c => cfg.toPayload(c))
       if (!payloads.length) { setErr('Không có dòng hợp lệ'); return }
       const { error } = await supabase.from(cfg.table).upsert(payloads, { onConflict: cfg.key })
       if (error) throw new Error(error.message)
@@ -334,7 +346,7 @@ export default function DanhMuc({ inline = false }) {
             {importing ? 'Đang import...' : '⬆ Import'}
           </button>
         </div>
-        <input ref={importRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleImport} />
+        <input ref={importRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleImport} />
 
         <input className="input-field" placeholder="Tìm kiếm..." value={search}
           onChange={e => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
