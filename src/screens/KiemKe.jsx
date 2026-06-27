@@ -257,6 +257,23 @@ export default function KiemKe({ currentUser }) {
         </div>
       </div>
 
+      {/* Lưu / Hủy — sticky dưới topbar, luôn hiện dù bàn phím mobile bật */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 9,
+        background: '#fff', borderBottom: '1px solid var(--border)',
+        padding: '8px 16px', display: 'flex', gap: 8
+      }}>
+        <button className="btn-secondary" onClick={handleHuy} disabled={saving}
+          style={{ flex: 1, height: 40 }}>
+          Hủy
+        </button>
+        <button className="btn-primary" onClick={handleLuu}
+          style={{ flex: 2, height: 40 }}
+          disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
+          {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
+        </button>
+      </div>
+
       <div className="content">
         {/* Banner khóa khi có xác nhận */}
         {(phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho) && (
@@ -334,17 +351,6 @@ export default function KiemKe({ currentUser }) {
             <input type="number" className="input-field" value={heSo}
               onChange={e => setHeSo(e.target.value)} min="0" step="any" />
           </div>
-        </div>
-
-        {/* Lưu / Hủy — đặt ngay dưới ô nhập để không bị bàn phím che */}
-        <div className="row-2col">
-          <button className="btn-secondary" onClick={handleHuy} disabled={saving}>
-            Hủy
-          </button>
-          <button className="btn-primary" onClick={handleLuu}
-            disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
-            {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
-          </button>
         </div>
 
         {/* Hàng 2: Quy đổi + Lượt kiểm + Chênh lệch */}
