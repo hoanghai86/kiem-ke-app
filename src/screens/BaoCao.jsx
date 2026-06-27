@@ -10,7 +10,7 @@ const TABS = [
   { key: 'ton_kho',   label: 'Tồn kho SS' },
 ]
 
-function downloadCSV(rows, cols, filename) {
+async function downloadCSV(rows, cols, filename) {
   const header = cols.map(c => c.label).join(',')
   const body = rows.map((r, i) =>
     cols.map(c => {
@@ -20,6 +20,19 @@ function downloadCSV(rows, cols, filename) {
     }).join(',')
   ).join('\n')
   const blob = new Blob(['﻿' + header + '\n' + body], { type: 'text/csv;charset=utf-8' })
+
+  // Mobile: dùng Web Share API để share trực tiếp qua Zalo, Drive...
+  const file = new File([blob], filename, { type: 'text/csv' })
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: filename })
+      return
+    } catch (err) {
+      if (err.name === 'AbortError') return // user bấm huỷ
+    }
+  }
+
+  // Desktop fallback: download bình thường
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename
@@ -572,14 +585,14 @@ export default function BaoCao() {
               onClick={() => downloadCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
               disabled={!displayTonKho.length}
               style={{ width: '100%', fontSize: 13 }}>
-              ⬇ Xuất CSV ({displayTonKho.length} dòng)
+              ⬆ Xuất / Chia sẻ CSV ({displayTonKho.length} dòng)
             </button>
           ) : (
             <button className="btn-secondary"
               onClick={() => downloadCSV(displayData, cols, filename)}
               disabled={!displayData.length}
               style={{ width: '100%', fontSize: 13 }}>
-              ⬇ Xuất CSV ({displayData.length} dòng)
+              ⬆ Xuất / Chia sẻ CSV ({displayData.length} dòng)
             </button>
           )}
         </div>
