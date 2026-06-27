@@ -127,6 +127,7 @@ export default function KiemKe({ currentUser }) {
   async function loadDanhSach() {
     const rows = await db.chitiet
       .where('phien_id').equals(phienId)
+      .filter(r => r.nguoi_nhap_id === currentUser.id)
       .sortBy('created_at')
     setDanhSach(rows.reverse())
   }
