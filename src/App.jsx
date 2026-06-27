@@ -155,7 +155,7 @@ function SyncButton() {
       {syncError && pending > 0 && (
         <button onClick={forceClear} style={{
           position: 'fixed',
-          top: 48,
+          top: 58,
           right: 'max(16px, calc((100vw - 480px) / 2 + 16px))',
           zIndex: 20,
           fontSize: 10, padding: '3px 8px', borderRadius: 20,
@@ -187,7 +187,7 @@ function AccountButton({ currentUser, onLogout }) {
 
   return (
     <div ref={menuRef} style={{
-      position: 'fixed', top: 10,
+      position: 'fixed', top: 19,
       right: 'max(58px, calc((100vw - 480px) / 2 + 58px))',
       zIndex: 20
     }}>
