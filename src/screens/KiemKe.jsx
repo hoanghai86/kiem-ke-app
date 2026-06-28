@@ -743,7 +743,7 @@ export default function KiemKe({ currentUser }) {
   }
 
   return (
-    <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+    <div className="screen">
       {/* Topbar */}
       <div className="topbar">
         <div className="topbar-title">{maKhoHienTai ? (khoMap[maKhoHienTai] || maKhoHienTai) : 'Kiểm kê'}</div>
@@ -752,7 +752,26 @@ export default function KiemKe({ currentUser }) {
         </div>
       </div>
 
-      <div className="content" style={{ flex: 1, overflowY: 'auto' }}>
+      {/* Hủy / Xóa / Lưu — sticky dưới topbar, luôn hiện dù bàn phím mở */}
+      <div style={{
+        position: 'sticky', top: 72, zIndex: 9,
+        background: '#fff', borderBottom: '1px solid var(--border)',
+        padding: '8px 16px', display: 'flex', gap: 8
+      }}>
+        <button className="btn-secondary" onClick={() => navigate('/')} style={{ flex: 1, height: 40 }}>
+          Hủy
+        </button>
+        <button className="btn-secondary" onClick={handleHuy} disabled={saving} style={{ flex: 1, height: 40 }}>
+          Xóa
+        </button>
+        <button className="btn-primary" onClick={handleLuu}
+          style={{ flex: 2, height: 40 }}
+          disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
+          {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
+        </button>
+      </div>
+
+      <div className="content">
         {/* Banner khóa khi có xác nhận */}
         {(phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho) && (
           <div style={{
@@ -981,25 +1000,6 @@ export default function KiemKe({ currentUser }) {
           </>
         )}
 
-      </div>
-
-      {/* Footer actions — luôn nằm trên bàn phím ảo */}
-      <div style={{
-        display: 'flex', gap: 8, flexShrink: 0,
-        padding: '8px 16px 64px',
-        borderTop: '1px solid var(--border)', background: '#fff'
-      }}>
-        <button className="btn-secondary" onClick={() => navigate('/')} style={{ flex: 1, height: 40 }}>
-          Hủy
-        </button>
-        <button className="btn-secondary" onClick={handleHuy} disabled={saving} style={{ flex: 1, height: 40 }}>
-          Xóa
-        </button>
-        <button className="btn-primary" onClick={handleLuu}
-          style={{ flex: 2, height: 40 }}
-          disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
-          {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
-        </button>
       </div>
     </div>
   )
