@@ -522,24 +522,27 @@ export default function KiemKe({ currentUser }) {
             </div>
           )}
           {danhSachLoc.map(item => (
-            <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', background: checkedIds.has(item.id) ? '#F0FDF4' : 'transparent' }}>
+            <div key={item.id}
+              onClick={() => setCheckedIds(prev => {
+                const next = new Set(prev)
+                next.has(item.id) ? next.delete(item.id) : next.add(item.id)
+                return next
+              })}
+              style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', background: checkedIds.has(item.id) ? '#F0FDF4' : 'transparent', cursor: 'pointer' }}>
               <div style={{ paddingTop: 13, paddingRight: 8, flexShrink: 0 }}>
                 <input type="checkbox" checked={checkedIds.has(item.id)}
-                  onChange={e => setCheckedIds(prev => {
-                    const next = new Set(prev)
-                    e.target.checked ? next.add(item.id) : next.delete(item.id)
-                    return next
-                  })} />
+                  onChange={() => {}}
+                  onClick={e => e.stopPropagation()} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {renderItemRow(item, (
                   <div style={{ display: 'flex', gap: 2 }}>
                     <button
-                      onClick={() => { setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '', ma_kho: item.ma_kho ?? '' }) }}
+                      onClick={e => { e.stopPropagation(); setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '', ma_kho: item.ma_kho ?? '' }) }}
                       style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#1a56db', lineHeight: 1 }}
                       title="Sửa">✏️</button>
                     <button
-                      onClick={() => handleDeleteItem(item.id)}
+                      onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
                       style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#DC2626', lineHeight: 1 }}
                       title="Xóa">🗑️</button>
                   </div>
