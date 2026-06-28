@@ -10,13 +10,29 @@ import {
 // -----------------------------------------------
 // Pull danh mục từ Supabase xuống IndexedDB
 // -----------------------------------------------
+async function fetchAllVatTu() {
+  const PAGE = 1000
+  let all = []
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('dm_vat_tu').select('*').eq('active', true)
+      .range(from, from + PAGE - 1)
+    if (error) return { data: null, error }
+    all = all.concat(data)
+    if (data.length < PAGE) break
+    from += PAGE
+  }
+  return { data: all, error: null }
+}
+
 export async function pullDanhMuc() {
   try {
     const [kho, users, dvt, vatTu, tonKho, goiY] = await Promise.all([
       supabase.from('dm_kho').select('*').eq('active', true),
       supabase.from('dm_user').select('*').eq('active', true),
       supabase.from('dm_dvt').select('*').eq('active', true),
-      supabase.from('dm_vat_tu').select('*').eq('active', true),
+      fetchAllVatTu(),
       supabase.from('ton_kho').select('*'),
       supabase.from('v_goi_y_vat_tu').select('*').limit(100)
     ])
