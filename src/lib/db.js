@@ -4,13 +4,6 @@ import Dexie from 'dexie'
 
 export const db = new Dexie('KiemKeDB')
 
-db.on('versionchange', () => { db.close() })
-db.open().catch(Dexie.VersionError, async () => {
-  console.warn('[DB] VersionError — xóa DB cũ và mở lại')
-  await Dexie.delete('KiemKeDB')
-  window.location.reload()
-})
-
 db.version(1).stores({
   dm_kho:    'ma_kho, ten_kho',
   dm_user:   'id, ma_user, role',
@@ -31,6 +24,13 @@ db.version(2).stores({
 // v3: thêm ngoai_so_sach index
 db.version(3).stores({
   chitiet: 'id, phien_id, ma_vt, ma_kho, ngoai_so_sach, synced, created_at'
+})
+
+db.on('versionchange', () => { db.close() })
+db.open().catch(Dexie.VersionError, async () => {
+  console.warn('[DB] VersionError — xóa DB cũ và mở lại')
+  await Dexie.delete('KiemKeDB')
+  window.location.reload()
 })
 
 // -----------------------------------------------
