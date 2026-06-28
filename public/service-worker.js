@@ -1,14 +1,13 @@
 // public/service-worker.js
-const CACHE_NAME = 'kiem-ke-v4'
+const CACHE_NAME = 'kiem-ke-v5'
 
-// Chỉ pre-cache các file chắc chắn tồn tại — JS/CSS chunk có hash cache động khi fetch
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
 ]
 
-// Install — cache shell, bỏ qua file lỗi 404
+// Install — pre-cache shell, bỏ qua file lỗi 404
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache =>
@@ -32,22 +31,38 @@ self.addEventListener('activate', event => {
   self.clients.claim()
 })
 
-// Fetch — cache first cho static, network first cho API
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url)
 
-  // API calls (Supabase, GAS) → network only
+  // API calls (Supabase, GAS) → network only, trả 503 khi offline để client xử lý đúng
   if (url.hostname.includes('supabase.co') || url.hostname.includes('script.google.com')) {
     event.respondWith(
       fetch(event.request).catch(() => new Response(
         JSON.stringify({ error: 'offline' }),
-        { headers: { 'Content-Type': 'application/json' } }
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
       ))
     )
     return
   }
 
-  // Static assets → cache first
+  // HTML / navigation → network first: lấy bản mới khi online, fallback cache khi offline
+  // Đảm bảo khi deploy code mới user luôn nhận được index.html mới nhất
+  if (event.request.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(event.request).then(response => {
+        if (response.ok) {
+          const clone = response.clone()
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone))
+        }
+        return response
+      }).catch(() =>
+        caches.match(event.request).then(cached => cached || caches.match('/index.html'))
+      )
+    )
+    return
+  }
+
+  // Static assets (JS, CSS, images) → cache first: hash-based filenames, an toàn cache lâu dài
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached
