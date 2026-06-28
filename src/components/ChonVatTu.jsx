@@ -100,9 +100,12 @@ export default function ChonVatTu({ onSelect, value }) {
   const showKetQua = query.trim() && showDropdown
 
   const nssOption = (
-    <div className="dropdown-item" style={{ color: 'var(--green)', fontStyle: 'italic' }}
-      onMouseDown={e => { e.preventDefault(); openNSSForm() }}>
-      + Thêm ngoài sổ sách
+    <div onMouseDown={e => { e.preventDefault(); openNSSForm() }} style={{
+      padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+      borderBottom: '1px solid var(--border)', background: '#F0FDF4',
+      color: 'var(--green)', fontWeight: 600, fontSize: 13
+    }}>
+      <span style={{ fontSize: 16 }}>＋</span> Thêm ngoài sổ sách
     </div>
   )
 
@@ -143,6 +146,7 @@ export default function ChonVatTu({ onSelect, value }) {
 
       {showGoiY && goiY.length > 0 && (
         <div className="dropdown">
+          {nssOption}
           <div className="dropdown-section-title">Kiểm gần đây</div>
           {goiY.map(item => (
             <div key={item.ma_vt} className="dropdown-item" onMouseDown={() => handleSelect(item)}>
@@ -150,19 +154,18 @@ export default function ChonVatTu({ onSelect, value }) {
               <span className="item-ten">{item.ten_vt}</span>
             </div>
           ))}
-          {nssOption}
         </div>
       )}
 
       {showKetQua && (
         <div className="dropdown">
+          {nssOption}
           {ketQua.map(item => (
             <div key={item.ma_vt} className="dropdown-item" onMouseDown={() => handleSelect(item)}>
               <span className="item-ma">{item.ma_vt}</span>
               <span className="item-ten">{item.ten_vt}</span>
             </div>
           ))}
-          {nssOption}
         </div>
       )}
 
