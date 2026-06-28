@@ -1,20 +1,23 @@
 // public/service-worker.js
-const CACHE_NAME = 'kiem-ke-v3'
+const CACHE_NAME = 'kiem-ke-v4'
 
-// Chỉ pre-cache các file có tên cố định — JS/CSS/chunk có hash sẽ được cache động khi fetch
+// Chỉ pre-cache các file chắc chắn tồn tại — JS/CSS chunk có hash cache động khi fetch
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/favicon.ico',
-  '/logo192.png',
-  '/logo512.png'
 ]
 
-// Install — cache shell tối thiểu
+// Install — cache shell, bỏ qua file lỗi 404
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then(cache =>
+      Promise.all(
+        STATIC_ASSETS.map(url =>
+          cache.add(url).catch(err => console.warn('[SW] Bỏ qua:', url, err))
+        )
+      )
+    )
   )
   self.skipWaiting()
 })
