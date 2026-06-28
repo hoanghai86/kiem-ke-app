@@ -4,6 +4,13 @@ import Dexie from 'dexie'
 
 export const db = new Dexie('KiemKeDB')
 
+db.on('versionchange', () => { db.close() })
+db.open().catch(Dexie.VersionError, async () => {
+  console.warn('[DB] VersionError — xóa DB cũ và mở lại')
+  await Dexie.delete('KiemKeDB')
+  window.location.reload()
+})
+
 db.version(1).stores({
   dm_kho:    'ma_kho, ten_kho',
   dm_user:   'id, ma_user, role',
