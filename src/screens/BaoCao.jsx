@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { db, updateChiTiet, deleteChiTiet, getSoSach } from '../lib/db'
 import { pushOfflineQueue } from '../lib/sync'
+import { fmtSL } from '../lib/utils'
 import ChonVatTu from '../components/ChonVatTu'
 
 const TABS = [
@@ -103,10 +104,10 @@ export default function BaoCao({ currentUser }) {
     { label: 'Stt',        get: (r, i) => i + 1 },
     { label: 'Mã VT',      get: r => r.ma_vt },
     { label: 'Tên VT',     get: r => r.ten_vt },
-    { label: 'SL thực tế', get: r => r.so_luong_thuc_te },
+    { label: 'SL thực tế', get: r => fmtSL(r.so_luong_thuc_te) },
     { label: 'ĐVT phụ',    get: r => r.ma_dvt_kiem || '' },
-    { label: '× Hệ số',    get: r => r.he_so_quy_doi ?? 1 },
-    { label: 'SL quy đổi', get: r => r.so_luong_quy_doi ?? '' },
+    { label: '× Hệ số',    get: r => fmtSL(r.he_so_quy_doi ?? 1) },
+    { label: 'SL quy đổi', get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '' },
     { label: 'ĐVT chính',  get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
     { label: 'Ghi chú',    get: r => r.ghi_chu || '' },
     { label: 'Kho',        get: r => r.dm_kho?.ten_kho || r.ma_kho || r.phien_kiem_ke?.dm_kho?.ten_kho || r.phien_kiem_ke?.ma_kho || '' },
@@ -120,7 +121,7 @@ export default function BaoCao({ currentUser }) {
     { label: 'Mã VT',      get: r => r.ma_vt },
     { label: 'Tên VT',     get: r => vtNameMap[r.ma_vt] || '' },
     { label: 'ĐVT chính',  get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
-    { label: 'SL sổ sách', get: r => r.so_luong_so_sach ?? '' },
+    { label: 'SL sổ sách', get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '' },
     { label: 'Kho',        get: r => khoList.find(k => k.ma_kho === r.ma_kho)?.ten_kho || r.ma_kho || '' },
   ]
 
@@ -129,9 +130,9 @@ export default function BaoCao({ currentUser }) {
     { label: 'Mã VT',            get: r => r.ma_vt },
     { label: 'Tên vật tư',       get: r => r.ten_vt },
     { label: 'ĐVT chính',        get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
-    { label: 'SL quy đổi',       get: r => r.so_luong_quy_doi ?? '' },
-    { label: 'SL sổ sách',       get: r => r.so_luong_so_sach ?? '' },
-    { label: 'Lệch KT-SS/TK-SS', get: r => r.chenh_lech ?? '' },
+    { label: 'SL quy đổi',       get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '' },
+    { label: 'SL sổ sách',       get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '' },
+    { label: 'Lệch KT-SS/TK-SS', get: r => r.chenh_lech != null ? fmtSL(r.chenh_lech) : '' },
     { label: 'Ghi chú',          get: r => r.ghi_chu || '' },
   ]
 
@@ -254,7 +255,13 @@ export default function BaoCao({ currentUser }) {
         const p = await db.phien.get(pid)
         if (p) phienMap[pid] = p
       }
-      setNssItems(rows.map(r => ({ ...r, _phien: phienMap[r.phien_id] })))
+      // Group by ma_vt — chỉ hiện 1 đại diện mỗi mã, _allIds chứa toàn bộ để reconcile hết
+      const grouped = new Map()
+      for (const r of rows) {
+        if (!grouped.has(r.ma_vt)) grouped.set(r.ma_vt, { ...r, _phien: phienMap[r.phien_id], _allIds: [] })
+        grouped.get(r.ma_vt)._allIds.push(r.id)
+      }
+      setNssItems([...grouped.values()])
     } finally {
       setLoadingNSS(false)
     }
@@ -284,18 +291,21 @@ export default function BaoCao({ currentUser }) {
     const soSachMoi = item._phien?.ma_kho
       ? await getSoSach(vtDung.ma_vt, item._phien.ma_kho)
       : null
-    await updateChiTiet(item.id, {
-      ma_vt: vtDung.ma_vt,
-      ten_vt: vtDung.ten_vt,
-      so_luong_so_sach: soSachMoi ?? 0,
-      ngoai_so_sach: false
-    })
+    const ids = item._allIds?.length ? item._allIds : [item.id]
+    for (const id of ids) {
+      await updateChiTiet(id, {
+        ma_vt: vtDung.ma_vt,
+        ten_vt: vtDung.ten_vt,
+        so_luong_so_sach: soSachMoi ?? 0,
+        ngoai_so_sach: false
+      })
+    }
     await db.dm_vat_tu.delete(item.ma_vt)
     await db.goi_y_vat_tu.delete(item.ma_vt)
     if (navigator.onLine) pushOfflineQueue()
     setReconcileItem(null)
     loadNSS()
-    setToastMsg(`Đã cập nhật mã vật tư: ${vtDung.ma_vt} · ${vtDung.ten_vt}`)
+    setToastMsg(`Đã cập nhật ${ids.length > 1 ? ids.length + ' dòng · ' : ''}${vtDung.ma_vt} · ${vtDung.ten_vt}`)
     setTimeout(() => setToastMsg(null), 3000)
   }
 
@@ -403,7 +413,7 @@ export default function BaoCao({ currentUser }) {
     if (isNaN(sl)) return '—'
     const maChinh = vtDvtChinhMap[detailItem.ma_vt]
     const tenChinh = maChinh ? (dvtMap[maChinh] || maChinh) : (dvtMap[form.ma_dvt_kiem] || form.ma_dvt_kiem)
-    return `${(sl * hs).toFixed(3)} ${tenChinh}`
+    return `${fmtSL(sl * hs)} ${tenChinh}`
   })()
 
   // ── Sub-screen render ────────────────────────────────────────────
@@ -434,7 +444,7 @@ export default function BaoCao({ currentUser }) {
                     value={form.so_luong_thuc_te}
                     onChange={e => setForm(f => ({ ...f, so_luong_thuc_te: e.target.value }))}
                     min="0" step="any" />
-                : <div className="input-readonly input-large">{detailItem.so_luong_thuc_te}</div>
+                : <div className="input-readonly input-large">{fmtSL(detailItem.so_luong_thuc_te)}</div>
               }
             </div>
             <div className="field-group">
@@ -458,7 +468,7 @@ export default function BaoCao({ currentUser }) {
                     value={form.he_so_quy_doi}
                     onChange={e => setForm(f => ({ ...f, he_so_quy_doi: e.target.value }))}
                     min="0" step="any" />
-                : <div className="input-readonly">{detailItem.he_so_quy_doi ?? 1}</div>
+                : <div className="input-readonly">{fmtSL(detailItem.he_so_quy_doi ?? 1)}</div>
               }
             </div>
             <div className="field-group">
@@ -467,7 +477,7 @@ export default function BaoCao({ currentUser }) {
                 {editMode ? formQuyDoi : (() => {
                   const maChinh = vtDvtChinhMap[detailItem.ma_vt]
                   const tenChinh = maChinh ? (dvtMap[maChinh] || maChinh) : ''
-                  return `${detailItem.so_luong_quy_doi ?? detailItem.so_luong_thuc_te} ${tenChinh}`
+                  return `${fmtSL(detailItem.so_luong_quy_doi ?? detailItem.so_luong_thuc_te)} ${tenChinh}`
                 })()}
               </div>
             </div>
@@ -490,8 +500,8 @@ export default function BaoCao({ currentUser }) {
               ['Người nhập', detailItem._nguoi_nhap || '—'],
               ['Phiên',      detailItem.phien_id ? '#' + detailItem.phien_id.slice(-4).toUpperCase() : '—'],
               ['Thời gian',  detailItem.created_at ? new Date(detailItem.created_at).toLocaleString('vi-VN') : '—'],
-              ['SL sổ sách', detailItem.so_luong_so_sach ?? '—'],
-              ['Chênh lệch', detailItem.chenh_lech ?? '—'],
+              ['SL sổ sách', detailItem.so_luong_so_sach != null ? fmtSL(detailItem.so_luong_so_sach) : '—'],
+              ['Chênh lệch', detailItem.chenh_lech != null ? fmtSL(detailItem.chenh_lech) : '—'],
             ].map(([label, val]) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '3px 0' }}>
                 <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -768,16 +778,10 @@ export default function BaoCao({ currentUser }) {
                     <div className="item-name" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <span className="item-code">{item.ma_vt}</span> · {item.ten_vt}
                     </div>
-                    <div style={{ fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
-                      {item.so_luong_thuc_te} {item.ma_dvt_kiem || ''}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
-                    <div className="item-meta">{item.ma_dvt_kiem || ''}</div>
-                    <span className="lot-tag" style={{ background: '#FEF3C7', color: '#D97706' }}>Ngoài SS</span>
+                    <span className="lot-tag" style={{ background: '#FEF3C7', color: '#D97706', flexShrink: 0 }}>Ngoài SS{item._allIds?.length > 1 ? ` · ${item._allIds.length} dòng` : ''}</span>
                   </div>
                   <div className="item-meta" style={{ marginTop: 2 }}>
-                    {tenKho ? `${tenKho} · ` : ''}{gio}
+                    {tenKho || ''}
                   </div>
                   <button className="btn-primary"
                     onClick={() => setReconcileItem(item)}
@@ -863,13 +867,13 @@ export default function BaoCao({ currentUser }) {
                       <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6' }}>{r.kho}</td>
                       <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', color: 'var(--text-muted)' }}>{r.phien}</td>
                       <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>
-                        {r.sl_kt !== null ? r.sl_kt : <span style={{ color: '#F59E0B' }}>—</span>}
+                        {r.sl_kt !== null ? fmtSL(r.sl_kt) : <span style={{ color: '#F59E0B' }}>—</span>}
                       </td>
                       <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>
-                        {r.sl_tk !== null ? r.sl_tk : <span style={{ color: '#F59E0B' }}>—</span>}
+                        {r.sl_tk !== null ? fmtSL(r.sl_tk) : <span style={{ color: '#F59E0B' }}>—</span>}
                       </td>
                       <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', textAlign: 'right', fontWeight: 700, color: missing ? '#D97706' : '#DC2626' }}>
-                        {missing ? '?' : lech > 0 ? `+${lech}` : lech}
+                        {missing ? '?' : lech > 0 ? `+${fmtSL(lech)}` : fmtSL(lech)}
                       </td>
                     </tr>
                   )

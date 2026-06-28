@@ -154,11 +154,11 @@ export default function TongHop({ currentUser }) {
 
   function fmt(n) {
     if (n === null || n === undefined || isNaN(n)) return '—'
-    return Math.abs(n).toFixed(3).replace(/\.?0+$/, '')
+    return Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
   }
   function fmtS(n) {
     if (n === null || n === undefined || isNaN(n)) return '—'
-    const abs = Math.abs(n).toFixed(3).replace(/\.?0+$/, '')
+    const abs = Math.abs(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
     return (n > 0 ? '+' : n < 0 ? '−' : '') + abs
   }
 

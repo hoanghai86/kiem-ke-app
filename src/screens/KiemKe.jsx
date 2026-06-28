@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { db, saveChiTietLocal, getSoSach, deleteChiTiet, updateChiTiet } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue, syncChiTietNow } from '../lib/sync'
+import { fmtSL } from '../lib/utils'
 import ChonVatTu from '../components/ChonVatTu'
 
 export default function KiemKe({ currentUser }) {
@@ -33,8 +34,17 @@ export default function KiemKe({ currentUser }) {
   const phienRef   = useRef(null) // tránh closure stale khi đọc ke_toan_id
 
   // Danh sách đã nhập — filter + CRUD
-  const [xemFilter, setXemFilter] = useState({ kho: '', vatTu: '', soLuong: '', dvt: '' })
+  const [xemFilter, setXemFilter] = useState({ kho: [], vatTu: [], soLuong: '', dvt: [] })
   const [showListFilter, setShowListFilter] = useState(false)
+  const [openKhoFilter, setOpenKhoFilter] = useState(false)
+  const [khoFilterQ, setKhoFilterQ] = useState('')
+  const [khoFilterSel, setKhoFilterSel] = useState([])
+  const [openDvtFilter, setOpenDvtFilter] = useState(false)
+  const [dvtFilterQ, setDvtFilterQ] = useState('')
+  const [dvtFilterSel, setDvtFilterSel] = useState([])
+  const [openVtModal, setOpenVtModal] = useState(false)
+  const [vtModalQ, setVtModalQ] = useState('')
+  const [vtModalSel, setVtModalSel] = useState([])
   const [editItem, setEditItem] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [editSaving, setEditSaving] = useState(false)
@@ -103,13 +113,25 @@ export default function KiemKe({ currentUser }) {
           .from('kiem_ke_chitiet')
           .select('*')
           .eq('phien_id', phienId)
-        if (remoteRows?.length) {
+        if (remoteRows) {
           const localRows = await db.chitiet.where('phien_id').equals(phienId).toArray()
           const localUnsyncedIds = new Set(localRows.filter(r => !r.synced).map(r => r.id))
-          const toStore = remoteRows
-            .filter(r => !localUnsyncedIds.has(r.id))
-            .map(r => ({ ...r, synced: true }))
-          if (toStore.length) await db.chitiet.bulkPut(toStore)
+          if (remoteRows.length) {
+            const remoteIds = new Set(remoteRows.map(r => r.id))
+            const toStore = remoteRows
+              .filter(r => !localUnsyncedIds.has(r.id))
+              .map(r => ({ ...r, synced: true }))
+            if (toStore.length) await db.chitiet.bulkPut(toStore)
+            // Xóa local row đã synced nhưng bị xóa trên server
+            const toDelete = localRows
+              .filter(r => r.synced && !remoteIds.has(r.id))
+              .map(r => r.id)
+            if (toDelete.length) await db.chitiet.bulkDelete(toDelete)
+          } else {
+            // Server trả về 0 dòng — xóa hết local synced
+            const toDelete = localRows.filter(r => r.synced).map(r => r.id)
+            if (toDelete.length) await db.chitiet.bulkDelete(toDelete)
+          }
         }
       }
 
@@ -169,13 +191,7 @@ export default function KiemKe({ currentUser }) {
   async function loadDanhSach() {
     const rows = await db.chitiet
       .where('phien_id').equals(phienId)
-      .filter(r => {
-        if (currentUser.role === 'admin') {
-          const keToanId = phienRef.current?.ke_toan_id
-          return r.nguoi_nhap_id === currentUser.id || r.nguoi_nhap_id === keToanId
-        }
-        return r.nguoi_nhap_id === currentUser.id
-      })
+      .filter(r => r.nguoi_nhap_id === currentUser.id)
       .sortBy('created_at')
     setDanhSach(rows.reverse())
   }
@@ -215,7 +231,7 @@ export default function KiemKe({ currentUser }) {
       ma_dvt_kiem: dvt,
       he_so_quy_doi: parseFloat(heSo) || 1,
       luot_kiem: luotKiem,
-      so_luong_thuc_te: parseFloat(soLuong),
+      so_luong_thuc_te: parseFloat(soLuong.replace(/,/g, '')),
       so_luong_so_sach: soSach,
       ghi_chu: ghiChu,
       hinh_anh_urls: [],
@@ -269,12 +285,6 @@ export default function KiemKe({ currentUser }) {
     await loadDanhSach()
   }
 
-  async function handleDeleteAll() {
-    if (!window.confirm(`Xóa tất cả ${danhSach.length} dòng đã nhập?`)) return
-    for (const item of danhSach) await deleteChiTiet(item.id)
-    if (navigator.onLine) pushOfflineQueue()
-    await loadDanhSach()
-  }
 
   async function handleDeleteChecked() {
     const ids = [...checkedIds]
@@ -306,7 +316,7 @@ export default function KiemKe({ currentUser }) {
 
   const vtHienTai = vatTuCoDinh
   const dvtChinh = vtHienTai ? (dvtChinhMap[vtHienTai.ma_vt] || '') : ''
-  const soQuyDoi = soLuong ? (parseFloat(soLuong) * (parseFloat(heSo) || 1)).toFixed(3) : null
+  const soQuyDoi = soLuong ? (parseFloat(soLuong.replace(/,/g, '')) * (parseFloat(heSo) || 1)).toFixed(3) : null
   const chenhLech = soQuyDoi && soSach !== null ? (parseFloat(soQuyDoi) - soSach).toFixed(3) : null
   const khoMap = Object.fromEntries(danhMucKho.map(k => [k.ma_kho, k.ten_kho]))
   const dvtNameMap = Object.fromEntries(danhMucDvt.map(d => [d.ma_dvt, d.ten_dvt]))
@@ -329,20 +339,20 @@ export default function KiemKe({ currentUser }) {
             <span style={{ fontWeight: 600, color: '#1a56db' }}>{item.ten_vt}</span>
           </div>
           <div style={{ flexShrink: 0, fontWeight: 700, fontSize: 15, color: '#DB2777' }}>
-            {soQD} <span style={{ fontSize: 11, fontWeight: 700 }}>{tenDvtChinh}</span>
+            {fmtSL(soQD)} <span style={{ fontSize: 11, fontWeight: 700 }}>{tenDvtChinh}</span>
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2, gap: 8 }}>
           <div className="item-meta">
             {showConv ? (
               <>
-                <span style={{ color: '#7C3AED', fontWeight: 700 }}>{item.so_luong_thuc_te}</span><span style={{ color: '#7C3AED', fontWeight: 600 }}> {tenDvtKiem}</span>
-                <span style={{ color: 'var(--text-muted)' }}> × {heSo} = </span>
-                <span style={{ color: '#DB2777', fontWeight: 600 }}>{soQD} {tenDvtChinh}</span>
+                <span style={{ color: '#7C3AED', fontWeight: 700 }}>{fmtSL(item.so_luong_thuc_te)}</span><span style={{ color: '#7C3AED', fontWeight: 600 }}> {tenDvtKiem}</span>
+                <span style={{ color: 'var(--text-muted)' }}> × {fmtSL(heSo)} = </span>
+                <span style={{ color: '#DB2777', fontWeight: 600 }}>{fmtSL(soQD)} {tenDvtChinh}</span>
               </>
             ) : (
               <>
-                <span style={{ color: '#7C3AED', fontWeight: 700 }}>{item.so_luong_thuc_te}</span>
+                <span style={{ color: '#7C3AED', fontWeight: 700 }}>{fmtSL(item.so_luong_thuc_te)}</span>
                 <span style={{ color: '#7C3AED', fontWeight: 600 }}> {tenDvtKiem}</span>
               </>
             )}
@@ -365,12 +375,30 @@ export default function KiemKe({ currentUser }) {
   const danhSachHienThi = danhSach.slice(0, 20)
 
   if (xemDanhSach) {
-    const hasFilter = !!(xemFilter.kho || xemFilter.vatTu || xemFilter.soLuong || xemFilter.dvt)
+    const hasFilter = !!(xemFilter.kho.length || xemFilter.vatTu.length || xemFilter.soLuong || xemFilter.dvt.length)
     const danhSachLoc = danhSach
-      .filter(r => !xemFilter.kho || r.ma_kho === xemFilter.kho)
-      .filter(r => !xemFilter.vatTu || r.ma_vt.toLowerCase().includes(xemFilter.vatTu.toLowerCase()) || r.ten_vt.toLowerCase().includes(xemFilter.vatTu.toLowerCase()))
+      .filter(r => !xemFilter.kho.length || xemFilter.kho.includes(r.ma_kho))
+      .filter(r => !xemFilter.vatTu.length || xemFilter.vatTu.includes(r.ma_vt))
       .filter(r => !xemFilter.soLuong || String(r.so_luong_thuc_te) === xemFilter.soLuong)
-      .filter(r => !xemFilter.dvt || r.ma_dvt_kiem === xemFilter.dvt)
+      .filter(r => !xemFilter.dvt.length || xemFilter.dvt.includes(r.ma_dvt_kiem))
+
+    const khoInDanhSach = [...new Map(danhSach.map(r => [r.ma_kho, danhMucKho.find(k => k.ma_kho === r.ma_kho) || { ma_kho: r.ma_kho, ten_kho: r.ma_kho }])).values()]
+      .sort((a, b) => (a.ten_kho || '').localeCompare(b.ten_kho || ''))
+    const khoFilterResults = khoFilterQ.trim()
+      ? khoInDanhSach.filter(k => k.ten_kho.toLowerCase().includes(khoFilterQ.toLowerCase()) || k.ma_kho.toLowerCase().includes(khoFilterQ.toLowerCase()))
+      : khoInDanhSach
+
+    const dvtInDanhSach = [...new Map(danhSach.filter(r => r.ma_dvt_kiem).map(r => [r.ma_dvt_kiem, { ma_dvt: r.ma_dvt_kiem, ten_dvt: danhMucDvt.find(d => d.ma_dvt === r.ma_dvt_kiem)?.ten_dvt || r.ma_dvt_kiem }])).values()]
+      .sort((a, b) => (a.ten_dvt || '').localeCompare(b.ten_dvt || ''))
+    const dvtFilterResults = dvtFilterQ.trim()
+      ? dvtInDanhSach.filter(d => d.ten_dvt.toLowerCase().includes(dvtFilterQ.toLowerCase()) || d.ma_dvt.toLowerCase().includes(dvtFilterQ.toLowerCase()))
+      : dvtInDanhSach
+
+    const vtInDanhSach = [...new Map(danhSach.map(r => [r.ma_vt, { ma_vt: r.ma_vt, ten_vt: r.ten_vt }])).values()]
+      .sort((a, b) => a.ma_vt.localeCompare(b.ma_vt))
+    const vtModalResults = vtModalQ.trim()
+      ? vtInDanhSach.filter(v => v.ma_vt.toLowerCase().includes(vtModalQ.toLowerCase()) || v.ten_vt.toLowerCase().includes(vtModalQ.toLowerCase()))
+      : vtInDanhSach
 
     return (
       <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -389,12 +417,6 @@ export default function KiemKe({ currentUser }) {
             style={{ height: 36 }}>
             Lọc {hasFilter ? '●' : ''}{showListFilter ? ' ▲' : ' ▼'}
           </button>
-          {danhSach.length > 0 && (
-            <button onClick={handleDeleteAll}
-              style={{ height: 36, padding: '0 12px', borderRadius: 8, border: '1px solid #FCA5A5', background: '#FEF2F2', color: '#DC2626', fontWeight: 600, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              Xóa tất cả
-            </button>
-          )}
         </div>
 
         {/* Filter panel */}
@@ -403,27 +425,38 @@ export default function KiemKe({ currentUser }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1 }}>
                 <div className="field-label">Kho</div>
-                <select className="input-select" value={xemFilter.kho}
-                  onChange={e => setXemFilter(f => ({ ...f, kho: e.target.value }))}>
-                  <option value="">Tất cả</option>
-                  {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
-                </select>
+                <div className="input-select" onClick={() => { setKhoFilterQ(''); setKhoFilterSel(xemFilter.kho); setOpenKhoFilter(true) }}
+                  style={{ cursor: 'pointer', color: xemFilter.kho.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {xemFilter.kho.length === 0
+                    ? 'Tất cả kho'
+                    : xemFilter.kho.length === 1
+                      ? (khoInDanhSach.find(k => k.ma_kho === xemFilter.kho[0])?.ten_kho || xemFilter.kho[0])
+                      : `${khoInDanhSach.find(k => k.ma_kho === xemFilter.kho[0])?.ten_kho || xemFilter.kho[0]} +${xemFilter.kho.length - 1}`}
+                </div>
               </div>
               <div style={{ flex: 1 }}>
                 <div className="field-label">ĐVT phụ</div>
-                <select className="input-select" value={xemFilter.dvt}
-                  onChange={e => setXemFilter(f => ({ ...f, dvt: e.target.value }))}>
-                  <option value="">Tất cả</option>
-                  {danhMucDvt.map(d => <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>)}
-                </select>
+                <div className="input-select" onClick={() => { setDvtFilterQ(''); setDvtFilterSel(xemFilter.dvt); setOpenDvtFilter(true) }}
+                  style={{ cursor: 'pointer', color: xemFilter.dvt.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {xemFilter.dvt.length === 0
+                    ? 'Tất cả ĐVT'
+                    : xemFilter.dvt.length === 1
+                      ? (dvtInDanhSach.find(d => d.ma_dvt === xemFilter.dvt[0])?.ten_dvt || xemFilter.dvt[0])
+                      : `${dvtInDanhSach.find(d => d.ma_dvt === xemFilter.dvt[0])?.ten_dvt || xemFilter.dvt[0]} +${xemFilter.dvt.length - 1}`}
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 2 }}>
                 <div className="field-label">Mã / tên vật tư</div>
-                <input className="input-field" value={xemFilter.vatTu}
-                  onChange={e => setXemFilter(f => ({ ...f, vatTu: e.target.value }))}
-                  placeholder="Tìm mã hoặc tên..." />
+                <div className="input-select" onClick={() => { setVtModalQ(''); setVtModalSel(xemFilter.vatTu); setOpenVtModal(true) }}
+                  style={{ cursor: 'pointer', color: xemFilter.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {xemFilter.vatTu.length === 0
+                    ? 'Tất cả vật tư'
+                    : xemFilter.vatTu.length === 1
+                      ? (vtInDanhSach.find(v => v.ma_vt === xemFilter.vatTu[0])?.ten_vt || xemFilter.vatTu[0])
+                      : `${vtInDanhSach.find(v => v.ma_vt === xemFilter.vatTu[0])?.ten_vt || xemFilter.vatTu[0]} +${xemFilter.vatTu.length - 1}`}
+                </div>
               </div>
               <div style={{ flex: 1 }}>
                 <div className="field-label">Số lượng</div>
@@ -434,7 +467,7 @@ export default function KiemKe({ currentUser }) {
             </div>
             {hasFilter && (
               <button className="btn-clear-filter"
-                onClick={() => setXemFilter({ kho: '', vatTu: '', soLuong: '', dvt: '' })}>
+                onClick={() => setXemFilter({ kho: [], vatTu: [], soLuong: '', dvt: [] })}>
                 Xóa lọc
               </button>
             )}
@@ -555,6 +588,121 @@ export default function KiemKe({ currentUser }) {
             </div>
           </div>
         )}
+
+      {openKhoFilter && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>Kho</span>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <button onClick={() => setKhoFilterSel([])}
+                  style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
+                <button onClick={() => { setXemFilter(f => ({ ...f, kho: khoFilterSel })); setOpenKhoFilter(false) }}
+                  style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+              </div>
+            </div>
+            <input type="text" className="input-field" placeholder="Tìm kho..."
+              value={khoFilterQ} onChange={e => setKhoFilterQ(e.target.value)}
+              style={{ margin: 0 }} autoFocus />
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {khoFilterResults.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Không tìm thấy</div>
+            ) : khoFilterResults.map(k => {
+              const checked = khoFilterSel.includes(k.ma_kho)
+              return (
+                <div key={k.ma_kho}
+                  onClick={() => setKhoFilterSel(prev => checked ? prev.filter(x => x !== k.ma_kho) : [...prev, k.ma_kho])}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--green)' : '#CBD5E1'}`, background: checked ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {checked && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                  <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{k.ma_kho}</span>
+                  <span style={{ fontSize: 14 }}>{k.ten_kho}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {openDvtFilter && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>ĐVT phụ</span>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <button onClick={() => setDvtFilterSel([])}
+                  style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
+                <button onClick={() => { setXemFilter(f => ({ ...f, dvt: dvtFilterSel })); setOpenDvtFilter(false) }}
+                  style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+              </div>
+            </div>
+            <input type="text" className="input-field" placeholder="Tìm đơn vị tính..."
+              value={dvtFilterQ} onChange={e => setDvtFilterQ(e.target.value)}
+              style={{ margin: 0 }} autoFocus />
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {dvtFilterResults.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Không tìm thấy</div>
+            ) : dvtFilterResults.map(d => {
+              const checked = dvtFilterSel.includes(d.ma_dvt)
+              return (
+                <div key={d.ma_dvt}
+                  onClick={() => setDvtFilterSel(prev => checked ? prev.filter(x => x !== d.ma_dvt) : [...prev, d.ma_dvt])}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--green)' : '#CBD5E1'}`, background: checked ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {checked && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize: 14 }}>{d.ten_dvt}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {openVtModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>Vật tư</span>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <button onClick={() => setVtModalSel([])}
+                  style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
+                <button onClick={() => { setXemFilter(f => ({ ...f, vatTu: vtModalSel })); setOpenVtModal(false) }}
+                  style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+              </div>
+            </div>
+            <input type="text" className="input-field"
+              placeholder="Tìm mã hoặc tên vật tư"
+              value={vtModalQ} onChange={e => setVtModalQ(e.target.value)}
+              style={{ margin: 0 }} autoFocus />
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {vtModalResults.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Không tìm thấy</div>
+            ) : vtModalResults.map(v => {
+              const checked = vtModalSel.includes(v.ma_vt)
+              return (
+                <div key={v.ma_vt}
+                  onClick={() => setVtModalSel(prev => checked ? prev.filter(x => x !== v.ma_vt) : [...prev, v.ma_vt])}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--green)' : '#CBD5E1'}`,
+                    background: checked ? 'var(--green)' : '#fff', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    {checked && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                  <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{v.ma_vt}</span>
+                  <span style={{ fontSize: 14 }}>{v.ten_vt}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
       </div>
     )
   }
@@ -606,15 +754,15 @@ export default function KiemKe({ currentUser }) {
           <label className="field-label" style={{ flexShrink: 0, marginBottom: 0 }}>Kho đang kiểm</label>
           <div onClick={() => { setOpenKhoModal(true); setTimeout(() => khoSearchRef.current?.focus(), 100) }}
             style={{
-              flex: 1, padding: '10px 12px', border: '1.5px solid var(--border)',
+              flex: 1, padding: '0 12px', border: '1.5px solid var(--border)',
               borderRadius: 10, fontSize: 15, background: '#fff',
               color: maKhoHienTai ? 'var(--text)' : 'var(--text-muted)',
-              cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center'
+              cursor: 'pointer', height: 40, display: 'flex', alignItems: 'center'
             }}>
             {maKhoHienTai ? khoMap[maKhoHienTai] || maKhoHienTai : 'Chọn kho...'}
           </div>
-          <button className="mode-tab active" onClick={() => navigate(`/dem-lai/${phienId}`)}
-            style={{ flexShrink: 0, fontWeight: 700, height: 40, alignSelf: 'center' }}>
+          <button onClick={() => navigate(`/dem-lai/${phienId}`)}
+            style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--green)', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', padding: 0 }}>
             ✓ Đếm lại
           </button>
         </div>
@@ -692,9 +840,15 @@ export default function KiemKe({ currentUser }) {
             <label className="field-label">Số lượng thực tế</label>
             <input
               ref={soLuongRef}
-              type="number" className="input-field input-large"
-              value={soLuong} onChange={e => setSoLuong(e.target.value)}
-              placeholder="0" min="0" step="any"
+              type="text" inputMode="decimal" className="input-field input-large"
+              value={soLuong}
+              onChange={e => setSoLuong(e.target.value.replace(/[^\d.]/g, ''))}
+              onBlur={() => {
+                const n = parseFloat(soLuong)
+                if (!isNaN(n)) setSoLuong(fmtSL(n))
+              }}
+              onFocus={() => setSoLuong(soLuong.replace(/,/g, ''))}
+              placeholder="0"
             />
           </div>
           <div className="field-group" style={{ flex: 1 }}>
@@ -771,7 +925,7 @@ export default function KiemKe({ currentUser }) {
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Quy đổi</label>
             <div className="input-readonly">
-              {soQuyDoi ? `${soQuyDoi} ${dvtChinh}` : '—'}
+              {soQuyDoi ? `${fmtSL(soQuyDoi)} ${dvtChinh}` : '—'}
             </div>
           </div>
           <div className="field-group" style={{ flex: 1 }}>
@@ -782,7 +936,7 @@ export default function KiemKe({ currentUser }) {
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Chênh lệch</label>
             <div className={`input-readonly ${!chenhLech ? '' : parseFloat(chenhLech) < 0 ? 'text-danger' : parseFloat(chenhLech) > 0 ? 'text-warn' : 'text-ok'}`}>
-              {chenhLech !== null ? (parseFloat(chenhLech) > 0 ? '+' : '') + chenhLech : '—'}
+              {chenhLech !== null ? (parseFloat(chenhLech) > 0 ? '+' : '') + fmtSL(chenhLech) : '—'}
             </div>
           </div>
         </div>

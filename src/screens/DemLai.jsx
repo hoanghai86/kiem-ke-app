@@ -4,6 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { db, toggleDoiChieu, updateChiTiet, deleteChiTiet } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue } from '../lib/sync'
+import { fmtSL } from '../lib/utils'
 
 function buildSummaryData(rows, ktId, tkId, roleMap = {}) {
   const grouped = {}
@@ -153,26 +154,20 @@ export default function DemLai({ currentUser }) {
     return maChinh ? tenDvt(maChinh) : ''
   }
 
-  function fmtSL(n) {
-    if (n === undefined || n === null || isNaN(n)) return '—'
-    const v = parseFloat(n)
-    return v % 1 === 0 ? v.toString() : parseFloat(v.toFixed(3)).toString()
-  }
-
   function renderMeta(item) {
     const tenKiem = tenDvt(item.ma_dvt_kiem)
     const maChinh = dvtChinhMap[item.ma_vt]
     const tenChinh = maChinh ? tenDvt(maChinh) : tenKiem
     const coHeSo = item.he_so_quy_doi && item.he_so_quy_doi !== 1
     return coHeSo
-      ? `${item.so_luong_thuc_te} ${tenKiem} × ${item.he_so_quy_doi} = ${item.so_luong_quy_doi} ${tenChinh}`
-      : `${item.so_luong_thuc_te} ${tenKiem}`
+      ? `${fmtSL(item.so_luong_thuc_te)} ${tenKiem} × ${fmtSL(item.he_so_quy_doi)} = ${fmtSL(item.so_luong_quy_doi)} ${tenChinh}`
+      : `${fmtSL(item.so_luong_thuc_te)} ${tenKiem}`
   }
 
   function renderQuyDoi(item) {
     const maChinh = dvtChinhMap[item.ma_vt]
     const tenChinh = maChinh ? tenDvt(maChinh) : tenDvt(item.ma_dvt_kiem)
-    return `${item.so_luong_quy_doi ?? item.so_luong_thuc_te} ${tenChinh}`
+    return `${fmtSL(item.so_luong_quy_doi ?? item.so_luong_thuc_te)} ${tenChinh}`
   }
 
   async function handleToggle(item) {
@@ -254,7 +249,7 @@ export default function DemLai({ currentUser }) {
     if (isNaN(sl)) return '—'
     const maChinh = dvtChinhMap[detailItem.ma_vt]
     const tenChinh = maChinh ? tenDvt(maChinh) : tenDvt(form.ma_dvt_kiem)
-    return `${(sl * hs).toFixed(3)} ${tenChinh}`
+    return `${fmtSL(sl * hs)} ${tenChinh}`
   })()
 
   // ── CẤP 3: EDIT / XEM TỪNG RECORD ───────────────────────────────────
@@ -274,7 +269,7 @@ export default function DemLai({ currentUser }) {
                     value={form.so_luong_thuc_te}
                     onChange={e => setForm(f => ({ ...f, so_luong_thuc_te: e.target.value }))}
                     min="0" step="any" />
-                : <div className="input-readonly input-large">{detailItem.so_luong_thuc_te}</div>}
+                : <div className="input-readonly input-large">{fmtSL(detailItem.so_luong_thuc_te)}</div>}
             </div>
             <div className="field-group">
               <label className="field-label">ĐVT</label>
@@ -295,7 +290,7 @@ export default function DemLai({ currentUser }) {
                     value={form.he_so_quy_doi}
                     onChange={e => setForm(f => ({ ...f, he_so_quy_doi: e.target.value }))}
                     min="0" step="any" />
-                : <div className="input-readonly">{detailItem.he_so_quy_doi ?? 1}</div>}
+                : <div className="input-readonly">{fmtSL(detailItem.he_so_quy_doi ?? 1)}</div>}
             </div>
             <div className="field-group">
               <label className="field-label">Quy đổi</label>

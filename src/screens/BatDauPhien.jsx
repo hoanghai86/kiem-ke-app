@@ -44,6 +44,10 @@ export default function BatDauPhien({ currentUser }) {
   const [khoMap, setKhoMap] = useState({})
   const [loadingDM, setLoadingDM] = useState(true)
 
+  // Filter user modal
+  const [filterModal, setFilterModal] = useState(null) // null | 'keToan' | 'thuKho'
+  const [filterModalQ, setFilterModalQ] = useState('')
+
   // Fetch từ Supabase, xóa record stale trong IndexedDB, cập nhật state
   async function syncServer() {
     if (!navigator.onLine) return
@@ -436,19 +440,17 @@ export default function BatDauPhien({ currentUser }) {
             <div className="row-2col">
               <div className="field-group">
                 <label className="field-label">Kế toán</label>
-                <select className="input-select" value={filters.keToanId}
-                  onChange={e => setFilters(f => ({ ...f, keToanId: e.target.value }))}>
-                  <option value="">Tất cả</option>
-                  {danhMucKeToan.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
-                </select>
+                <div className="input-select" onClick={() => { setFilterModalQ(''); setFilterModal('keToan') }}
+                  style={{ cursor: 'pointer', color: filters.keToanId ? 'var(--text)' : 'var(--text-muted)' }}>
+                  {filters.keToanId ? (userMap[filters.keToanId] || filters.keToanId) : 'Tất cả'}
+                </div>
               </div>
               <div className="field-group">
                 <label className="field-label">Thủ kho</label>
-                <select className="input-select" value={filters.thuKhoId}
-                  onChange={e => setFilters(f => ({ ...f, thuKhoId: e.target.value }))}>
-                  <option value="">Tất cả</option>
-                  {danhMucThuKho.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
-                </select>
+                <div className="input-select" onClick={() => { setFilterModalQ(''); setFilterModal('thuKho') }}
+                  style={{ cursor: 'pointer', color: filters.thuKhoId ? 'var(--text)' : 'var(--text-muted)' }}>
+                  {filters.thuKhoId ? (userMap[filters.thuKhoId] || filters.thuKhoId) : 'Tất cả'}
+                </div>
               </div>
             </div>
             <div className="row-2col">
@@ -486,13 +488,7 @@ export default function BatDauPhien({ currentUser }) {
             const isLocked = p.xac_nhan_ke_toan || p.xac_nhan_thu_kho
             return (
               <div key={p.id} className="phien-card">
-                <div className="phien-card-top"
-                  onClick={() => {
-                    if (!dangKiem) { showToast('Phiên đã hoàn thành. Admin cần đổi lại trạng thái mới kiểm kê được.'); return }
-                    if (isLocked)  { showToast('Đã có xác nhận — không thể nhập thêm. Bỏ xác nhận để tiếp tục.'); return }
-                    navigate(`/kiem-ke/${p.id}`)
-                  }}
-                  style={{ cursor: (dangKiem && !isLocked) ? 'pointer' : 'not-allowed' }}>
+                <div className="phien-card-top">
                   <div className="phien-card-info">
                     <div className="phien-card-kho">Mã phiên: #{maPhien}</div>
                     <div className="phien-card-meta">{ngay} {gio} · {tenKT} & {tenTK}</div>
@@ -517,19 +513,19 @@ export default function BatDauPhien({ currentUser }) {
                           const isMe = currentUser.id === userId
                           return (
                             <button key={label} onClick={() => isMe && handleXacNhan(p)} style={{
-                              flex: 1, padding: '10px 8px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                              flex: 1, padding: '5px 8px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+                              display: 'flex', alignItems: 'center', gap: 6,
                               border: `1.5px solid ${confirmed ? 'var(--green)' : isMe ? 'var(--green)' : 'var(--border)'}`,
                               background: confirmed ? '#e1f5ee' : isMe ? 'var(--green-light)' : 'white',
                               color: confirmed ? 'var(--green-dark)' : isMe ? 'var(--green-dark)' : 'var(--text-muted)',
                               cursor: isMe ? 'pointer' : 'default',
                               opacity: !isMe && !confirmed ? 0.45 : 1,
                             }}>
-                              <span style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>{label}</span>
+                              <span style={{ fontWeight: 600 }}>{label}:</span>
                               <span>
                                 {confirmed
-                                  ? (isMe ? '✕ Bấm để bỏ xác nhận' : '✓ Đã xác nhận')
-                                  : (isMe ? '✓ Bấm để xác nhận hoàn thành' : '○ Chưa xác nhận')}
+                                  ? (isMe ? '✕ Bỏ xác nhận' : '✓ Đã xác nhận')
+                                  : (isMe ? '✓ Xác nhận hoàn thành' : '○ Chưa xác nhận')}
                               </span>
                             </button>
                           )
@@ -567,6 +563,49 @@ export default function BatDauPhien({ currentUser }) {
           })
         )}
       </div>
+
+      {filterModal && (() => {
+        const isKT = filterModal === 'keToan'
+        const title = isKT ? 'Kế toán' : 'Thủ kho'
+        const list = isKT ? danhMucKeToan : danhMucThuKho
+        const currentVal = isKT ? filters.keToanId : filters.thuKhoId
+        const filterKey = isKT ? 'keToanId' : 'thuKhoId'
+        const q = filterModalQ.trim().toLowerCase()
+        const results = q ? list.filter(u => u.ho_ten.toLowerCase().includes(q)) : list
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>{title}</span>
+                <button onClick={() => setFilterModal(null)}
+                  style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+              </div>
+              <input type="text" className="input-field" placeholder={`Tìm ${title.toLowerCase()}...`}
+                value={filterModalQ} onChange={e => setFilterModalQ(e.target.value)}
+                style={{ margin: 0 }} autoFocus />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {/* Tất cả */}
+              <div onClick={() => { setFilters(f => ({ ...f, [filterKey]: '' })); setFilterModal(null) }}
+                style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${!currentVal ? 'var(--green)' : '#CBD5E1'}`, background: !currentVal ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {!currentVal && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
+                </div>
+                <span style={{ fontSize: 14, color: 'var(--text-muted)' }}>Tất cả</span>
+              </div>
+              {results.map(u => (
+                <div key={u.id} onClick={() => { setFilters(f => ({ ...f, [filterKey]: u.id })); setFilterModal(null) }}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${currentVal === u.id ? 'var(--green)' : '#CBD5E1'}`, background: currentVal === u.id ? 'var(--green)' : '#fff', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {currentVal === u.id && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
+                  </div>
+                  <span style={{ fontSize: 14 }}>{u.ho_ten}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
 
       {toast && (
         <div style={{
