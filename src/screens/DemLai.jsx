@@ -87,9 +87,7 @@ export default function DemLai({ currentUser }) {
     setDanhMucDvt(dvtList)
     setDanhMucKho(khoList)
 
-    const { data: { user } } = await supabase.auth.getUser()
-    const uid = user?.id
-    setMyId(uid)
+    setMyId(currentUser?.id)
 
     if (navigator.onLine) {
       const [vtRes, khoRes] = await Promise.all([
