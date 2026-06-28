@@ -49,9 +49,22 @@ export async function pullDanhMuc() {
         if (kho.data)    { await db.dm_kho.clear();       await db.dm_kho.bulkPut(kho.data) }
         if (users.data)  { await db.dm_user.clear();      await db.dm_user.bulkPut(users.data) }
         if (dvt.data)    { await db.dm_dvt.clear();       await db.dm_dvt.bulkPut(dvt.data) }
-        if (vatTu.data)  { await db.dm_vat_tu.clear();    await db.dm_vat_tu.bulkPut(vatTu.data) }
+        if (vatTu.data)  {
+          // Giữ lại NSS items cục bộ trước khi xóa
+          const nssLocal = await db.dm_vat_tu.filter(v => v.ngoai_so_sach === true).toArray()
+          const officialCodes = new Set(vatTu.data.map(v => v.ma_vt))
+          await db.dm_vat_tu.clear()
+          await db.dm_vat_tu.bulkPut(vatTu.data)
+          const nssToRestore = nssLocal.filter(v => !officialCodes.has(v.ma_vt))
+          if (nssToRestore.length) await db.dm_vat_tu.bulkPut(nssToRestore)
+        }
         if (tonKho.data) { await db.ton_kho.clear();      await db.ton_kho.bulkPut(tonKho.data) }
-        if (goiY.data)   { await db.goi_y_vat_tu.clear(); await db.goi_y_vat_tu.bulkPut(goiY.data) }
+        if (goiY.data)   {
+          const nssGoiY = await db.goi_y_vat_tu.filter(v => v.ngoai_so_sach === true).toArray()
+          await db.goi_y_vat_tu.clear()
+          await db.goi_y_vat_tu.bulkPut(goiY.data)
+          if (nssGoiY.length) await db.goi_y_vat_tu.bulkPut(nssGoiY)
+        }
       }
     )
     console.log('[Sync] Pull danh mục OK — kho:', kho.data?.length, 'vật tư:', vatTu.data?.length)
@@ -65,67 +78,57 @@ export async function pullDanhMuc() {
 // -----------------------------------------------
 // Push offline queue lên Supabase
 // -----------------------------------------------
+let _pushing = false
+
 export async function pushOfflineQueue() {
+  if (_pushing) return { errors: 0 }  // đang chạy rồi, bỏ qua
+  _pushing = true
+  try {
+    return await _doPush()
+  } finally {
+    _pushing = false
+  }
+}
+
+async function _doPush() {
   const queue = await getPendingSyncQueue()
   if (!queue.length) return { errors: 0 }
 
   let errors = 0
 
-  for (const item of queue) {
+  // Phase 1: phien upserts tuần tự (ít item, cần đảm bảo FK cha tồn tại trước)
+  for (const item of queue.filter(i => i.table_name === 'phien' && i.action !== 'delete')) {
     try {
-      if (item.action === 'delete') {
-        const tableMap = { phien: 'phien_kiem_ke', chitiet: 'kiem_ke_chitiet' }
-        const supabaseTable = tableMap[item.table_name]
-        if (supabaseTable) {
-          const { error } = await supabase.from(supabaseTable).delete().eq('id', item.record_id)
-          if (!error) await removeSyncQueueItem(item.id)
-          else { console.error('[Sync] Lỗi delete:', supabaseTable, error.message); errors++ }
-        }
-        continue
-      }
-
-      if (item.table_name === 'phien') {
-        const record = await db.phien.get(item.record_id)
-        if (!record) { await removeSyncQueueItem(item.id); continue }
-
-        const { error } = await supabase.from('phien_kiem_ke').upsert(toSupabasePhien(record))
-        if (error) {
-          console.error('[Sync] Lỗi upsert phien:', error.message, record.id)
-          errors++
-        } else {
-          await db.phien.update(item.record_id, { synced: true })
-          await removeSyncQueueItem(item.id)
-        }
-      }
-
-      if (item.table_name === 'chitiet') {
-        const record = await db.chitiet.get(item.record_id)
-        if (!record) { await removeSyncQueueItem(item.id); continue }
-
-        // Đảm bảo phiên cha đã có trên Supabase trước (tránh FK fail)
-        if (record.phien_id) {
-          const phien = await db.phien.get(record.phien_id)
-          if (phien && !phien.synced) {
-            const { error: pe } = await supabase.from('phien_kiem_ke').upsert(toSupabasePhien(phien))
-            if (!pe) await db.phien.update(phien.id, { synced: true })
-            else console.error('[Sync] Lỗi upsert phien cha của chitiet:', pe.message)
-          }
-        }
-
-        const { error } = await supabase.from('kiem_ke_chitiet').upsert(toSupabaseChiTiet(record))
-        if (error) {
-          console.error('[Sync] Lỗi upsert chitiet:', error.message, record.id)
-          errors++
-        } else {
-          await db.chitiet.update(item.record_id, { synced: true })
-          await removeSyncQueueItem(item.id)
-        }
-      }
-    } catch (err) {
-      console.error('[Sync] Push lỗi item:', item.id, err)
-      errors++
-    }
+      const record = await db.phien.get(item.record_id)
+      if (!record) { await removeSyncQueueItem(item.id); continue }
+      const { error } = await supabase.from('phien_kiem_ke').upsert(toSupabasePhien(record))
+      if (error) { console.error('[Sync] Lỗi upsert phien:', error.message); errors++ }
+      else { await db.phien.update(item.record_id, { synced: true }); await removeSyncQueueItem(item.id) }
+    } catch (e) { console.error('[Sync] Push phien lỗi:', e); errors++ }
   }
+
+  // Phase 2: chitiet upserts song song (bulk của queue)
+  const chitietItems = queue.filter(i => i.table_name === 'chitiet' && i.action !== 'delete')
+  const chitietResults = await Promise.allSettled(chitietItems.map(async item => {
+    const record = await db.chitiet.get(item.record_id)
+    if (!record) { await removeSyncQueueItem(item.id); return }
+    const { error } = await supabase.from('kiem_ke_chitiet').upsert(toSupabaseChiTiet(record))
+    if (error) throw new Error(`chitiet ${item.record_id}: ${error.message}`)
+    await db.chitiet.update(item.record_id, { synced: true })
+    await removeSyncQueueItem(item.id)
+  }))
+  chitietResults.forEach(r => { if (r.status === 'rejected') { console.error('[Sync]', r.reason); errors++ } })
+
+  // Phase 3: deletes song song
+  const deleteItems = queue.filter(i => i.action === 'delete')
+  const tableMap = { phien: 'phien_kiem_ke', chitiet: 'kiem_ke_chitiet' }
+  await Promise.allSettled(deleteItems.map(async item => {
+    const t = tableMap[item.table_name]
+    if (!t) return
+    const { error } = await supabase.from(t).delete().eq('id', item.record_id)
+    if (error) { console.error('[Sync] Lỗi delete:', t, error.message); errors++ }
+    else await removeSyncQueueItem(item.id)
+  }))
 
   console.log(`[Sync] Push queue xong — lỗi: ${errors}`)
   return { errors }
@@ -157,24 +160,33 @@ export async function syncToGoogleSheet(phien_id) {
 }
 
 // -----------------------------------------------
-// Realtime: nhận thay đổi dm_vat_tu incremental
+// Realtime: nhận thay đổi tất cả danh mục
 // -----------------------------------------------
-let _vatTuChannel = null
+let _danhMucChannel = null
 export function subscribeVatTuRealtime() {
-  if (_vatTuChannel) return () => {}
-  _vatTuChannel = supabase
-    .channel('dm_vat_tu_changes')
+  if (_danhMucChannel) return () => {}
+  _danhMucChannel = supabase
+    .channel('danh_muc_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_vat_tu' }, async payload => {
-      if (payload.eventType === 'DELETE') {
-        await db.dm_vat_tu.delete(payload.old.ma_vt)
-      } else {
-        await db.dm_vat_tu.put(payload.new)
-      }
+      if (payload.eventType === 'DELETE') await db.dm_vat_tu.delete(payload.old.ma_vt)
+      else await db.dm_vat_tu.put(payload.new)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_kho' }, async payload => {
+      if (payload.eventType === 'DELETE') await db.dm_kho.delete(payload.old.ma_kho)
+      else await db.dm_kho.put(payload.new)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_dvt' }, async payload => {
+      if (payload.eventType === 'DELETE') await db.dm_dvt.delete(payload.old.ma_dvt)
+      else await db.dm_dvt.put(payload.new)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_user' }, async payload => {
+      if (payload.eventType === 'DELETE') await db.dm_user.delete(payload.old.id)
+      else await db.dm_user.put(payload.new)
     })
     .subscribe()
   return () => {
-    supabase.removeChannel(_vatTuChannel)
-    _vatTuChannel = null
+    supabase.removeChannel(_danhMucChannel)
+    _danhMucChannel = null
   }
 }
 
@@ -202,6 +214,30 @@ function toSupabasePhien(r) {
     trang_thai: r.trang_thai,
     xac_nhan_ke_toan: r.xac_nhan_ke_toan ?? false,
     xac_nhan_thu_kho: r.xac_nhan_thu_kho ?? false
+  }
+}
+
+// Upsert 1 chitiet vừa nhập lên Supabase ngay lập tức (không drain toàn bộ queue)
+export async function syncChiTietNow(record) {
+  try {
+    // Đảm bảo phiên cha đã có trên Supabase
+    const phien = await db.phien.get(record.phien_id)
+    if (phien && !phien.synced) {
+      const { error: pe } = await supabase.from('phien_kiem_ke').upsert(toSupabasePhien(phien))
+      if (pe) console.error('[Sync] syncChiTietNow — lỗi upsert phien:', pe.code, pe.message)
+      else await db.phien.update(phien.id, { synced: true })
+    }
+    const payload = toSupabaseChiTiet(record)
+    const { error } = await supabase.from('kiem_ke_chitiet').upsert(payload)
+    if (!error) {
+      await db.chitiet.update(record.id, { synced: true })
+      await db.sync_queue.where('record_id').equals(record.id).delete()
+      console.log('[Sync] syncChiTietNow OK — id:', record.id, 'ma_vt:', record.ma_vt)
+    } else {
+      console.error('[Sync] syncChiTietNow — lỗi upsert chitiet:', error.code, error.message, '\npayload:', JSON.stringify(payload))
+    }
+  } catch (e) {
+    console.error('[Sync] syncChiTietNow lỗi:', e)
   }
 }
 

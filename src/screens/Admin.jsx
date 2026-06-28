@@ -23,7 +23,10 @@ export default function Admin() {
   const [userForm, setUserForm] = useState({ ma_user: '', ho_ten: '', role: 'ke_toan', email: '', password: '' })
   const [savingUser, setSavingUser] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [selectedUserId, setSelectedUserId] = useState(null)
+  const [confirmDeleteFiltered, setConfirmDeleteFiltered] = useState(false)
   const [userErr, setUserErr] = useState('')
+  const [userInfoMsg, setUserInfoMsg] = useState('')
   const [userSearch, setUserSearch] = useState('')
   const [filterRole, setFilterRole] = useState('all')
   const [filterActive, setFilterActive] = useState('all')
@@ -117,9 +120,26 @@ export default function Admin() {
     setDanhSachUser(prev => prev.map(u => u.id === user.id ? { ...u, active: !u.active } : u))
   }
 
+  async function checkUsersInUse(userIds) {
+    const [r1, r2] = await Promise.all([
+      supabase.from('phien_kiem_ke').select('ke_toan_id').in('ke_toan_id', userIds),
+      supabase.from('phien_kiem_ke').select('thu_kho_id').in('thu_kho_id', userIds),
+    ])
+    return new Set([
+      ...(r1.data||[]).map(r=>r.ke_toan_id),
+      ...(r2.data||[]).map(r=>r.thu_kho_id),
+    ])
+  }
+
   async function handleDeleteUser(id) {
     setSavingUser(true)
     try {
+      const inUse = await checkUsersInUse([id])
+      if (inUse.has(id)) {
+        setUserErr('Không thể xóa: người dùng này đã tham gia phiên kiểm kê. Dùng "Tạm khóa" thay thế.')
+        setDeletingId(null)
+        return
+      }
       await callGas({ action: 'delete_user', id })
       await loadUsers()
     } catch (e) {
@@ -127,6 +147,25 @@ export default function Admin() {
     } finally {
       setSavingUser(false)
       setDeletingId(null)
+    }
+  }
+
+  async function handleDeleteFilteredUsers(users) {
+    setSavingUser(true)
+    try {
+      const inUse = await checkUsersInUse(users.map(u => u.id))
+      const safe = users.filter(u => !inUse.has(u.id))
+      for (const u of safe) {
+        await callGas({ action: 'delete_user', id: u.id })
+      }
+      await loadUsers()
+      setConfirmDeleteFiltered(false)
+      if (inUse.size === 0) setUserSearch('')
+      if (inUse.size > 0) setUserInfoMsg(`Đã xóa ${safe.length} người dùng. Giữ lại ${inUse.size} người đã tham gia phiên kiểm kê.`)
+    } catch (e) {
+      setUserErr(e.message)
+    } finally {
+      setSavingUser(false)
     }
   }
 
@@ -227,7 +266,17 @@ export default function Admin() {
         {/* Tab Người dùng */}
         {tab === 'users' && (
           <>
-            {userErr && <div className="error-box">{userErr}</div>}
+            {userErr && <div className="error-box" onClick={() => setUserErr('')}>{userErr} ✕</div>}
+            {userInfoMsg && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+                  <div style={{ fontSize: 36, textAlign: 'center', marginBottom: 10 }}>✅</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'center', marginBottom: 8, color: 'var(--text)' }}>Kết quả xóa</div>
+                  <div style={{ fontSize: 14, color: 'var(--text)', textAlign: 'center', lineHeight: 1.6, marginBottom: 20 }}>{userInfoMsg}</div>
+                  <button onClick={() => setUserInfoMsg('')} style={{ width: '100%', padding: '11px', borderRadius: 8, border: 'none', background: 'var(--green)', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>OK</button>
+                </div>
+              </div>
+            )}
 
             <button className="btn-primary" onClick={openCreate}
               style={{ width: '100%', marginBottom: 10 }}>
@@ -235,12 +284,12 @@ export default function Admin() {
             </button>
 
             {/* Bộ lọc */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 8 }}>
               <input
                 className="input-field"
-                placeholder="Tìm theo mã, họ tên, email..."
+                placeholder="Tìm theo mã, họ tên... (nhiều mã cách nhau bằng dấu phẩy)"
                 value={userSearch}
-                onChange={e => setUserSearch(e.target.value)}
+                onChange={e => { setUserSearch(e.target.value); setConfirmDeleteFiltered(false) }}
               />
               <div style={{ display: 'flex', gap: 8 }}>
                 <select className="input-select" style={{ flex: 1 }}
@@ -262,65 +311,116 @@ export default function Admin() {
             {loadingUser ? (
               <div className="empty-state">Đang tải...</div>
             ) : (() => {
-              const kw = userSearch.trim().toLowerCase()
+              const terms = userSearch.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
               const filtered = danhSachUser.filter(u => {
                 if (filterRole !== 'all' && u.role !== filterRole) return false
                 if (filterActive !== 'all' && String(u.active) !== filterActive) return false
-                if (kw && !`${u.ma_user} ${u.ho_ten} ${u.email || ''}`.toLowerCase().includes(kw)) return false
+                if (terms.length) {
+                  const text = `${u.ma_user} ${u.ho_ten} ${u.email || ''}`.toLowerCase()
+                  if (!terms.some(t => text.includes(t))) return false
+                }
                 return true
               })
               if (filtered.length === 0) return <div className="empty-state">Không tìm thấy người dùng nào</div>
-              return filtered.map(user => {
-                const rc = ROLE_COLOR[user.role] || { bg: '#F3F4F6', color: '#374151' }
-                return (
-                  <div key={user.id} className="phien-card" style={{ opacity: user.active ? 1 : 0.6 }}>
-                    <div className="phien-card-top">
-                      <div className="phien-card-info">
-                        <div className="phien-card-kho">{user.ho_ten}</div>
-                        <div className="phien-card-meta">
-                          {user.ma_user} · {user.email || '—'}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-                        <span style={{ background: rc.bg, color: rc.color, borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>
-                          {ROLE_LABEL[user.role] || user.role}
-                        </span>
-                        <span style={{ fontSize: 11, color: user.active ? 'var(--green)' : 'var(--text-muted)' }}>
-                          {user.active ? '● Hoạt động' : '○ Tạm khóa'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Delete confirmation inline */}
-                    {deletingId === user.id && (
-                      <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', background: '#FEF2F2', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ flex: 1, fontSize: 13, color: '#991B1B' }}>Xác nhận xóa {user.ho_ten}?</span>
-                        <button className="btn-primary" style={{ background: '#EF4444', border: 'none', height: 30, fontSize: 12, padding: '0 12px' }}
-                          onClick={() => handleDeleteUser(user.id)} disabled={savingUser}>
+              return (
+                <>
+                  {terms.length > 0 && (
+                    confirmDeleteFiltered ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+                        <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {filtered.length} người dùng đang lọc?</span>
+                        <button onClick={() => handleDeleteFilteredUsers(filtered)} disabled={savingUser}
+                          style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                           {savingUser ? '...' : 'Xóa'}
                         </button>
-                        <button className="btn-secondary" style={{ height: 30, fontSize: 12, padding: '0 12px' }}
-                          onClick={() => setDeletingId(null)}>Hủy</button>
+                        <button onClick={() => setConfirmDeleteFiltered(false)}
+                          style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                          Hủy
+                        </button>
                       </div>
-                    )}
-
-                    {/* Actions */}
-                    <div className="phien-card-actions-full">
-                      {[
-                        { label: 'Sửa', onClick: () => openEdit(user), color: 'var(--text)' },
-                        { label: user.active ? 'Tạm khóa' : 'Mở khóa', onClick: () => handleToggleActive(user), color: 'var(--orange-dark)' },
-                        { label: deletingId === user.id ? 'Đóng' : 'Xóa', onClick: () => setDeletingId(deletingId === user.id ? null : user.id), color: '#EF4444' }
-                      ].map(({ label, onClick, color }) => (
-                        <button key={label} onClick={onClick} style={{
-                          flex: 1, padding: '9px 4px', border: 'none', background: 'none',
-                          fontSize: 12, fontWeight: 500, color, cursor: 'pointer',
-                          borderRight: '1px solid var(--border)'
-                        }}>{label}</button>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })
+                    ) : (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filtered.length} kết quả</span>
+                        <button onClick={() => setConfirmDeleteFiltered(true)}
+                          style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                          Xóa {filtered.length} mục này
+                        </button>
+                      </div>
+                    )
+                  )}
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Họ tên</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Vai trò</th>
+                      <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(user => {
+                      const rc    = ROLE_COLOR[user.role] || { bg: '#F3F4F6', color: '#374151' }
+                      const isSel = selectedUserId === user.id
+                      return (
+                        <>
+                          <tr key={user.id}
+                            onClick={() => { setSelectedUserId(isSel ? null : user.id); setDeletingId(null) }}
+                            style={{ cursor: 'pointer', opacity: user.active ? 1 : 0.55, background: isSel ? '#F0FDF4' : 'white', borderBottom: '1px solid #F3F4F6' }}>
+                            <td style={{ padding: '10px 10px' }}>
+                              <div style={{ fontWeight: 600 }}>{user.ho_ten}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{user.ma_user} · {user.email || '—'}</div>
+                            </td>
+                            <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
+                              <span style={{ background: rc.bg, color: rc.color, borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 700 }}>
+                                {ROLE_LABEL[user.role] || user.role}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                              <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4,
+                                background: user.active ? '#D1FAE5' : '#F3F4F6', color: user.active ? '#065F46' : '#6B7280' }}>
+                                {user.active ? 'HĐ' : 'Khóa'}
+                              </span>
+                            </td>
+                          </tr>
+                          {isSel && (
+                            <tr key={`${user.id}_sel`} style={{ background: '#F0FDF4' }}>
+                              <td colSpan={3} style={{ padding: '8px 10px', borderBottom: '1px solid #D1FAE5' }}>
+                                {deletingId === user.id ? (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span style={{ flex: 1, fontSize: 13, color: '#991B1B' }}>Xác nhận xóa {user.ho_ten}?</span>
+                                    <button onClick={e => { e.stopPropagation(); handleDeleteUser(user.id) }} disabled={savingUser}
+                                      style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                                      {savingUser ? '...' : 'Xóa'}
+                                    </button>
+                                    <button onClick={e => { e.stopPropagation(); setDeletingId(null) }}
+                                      style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                                      Hủy
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', gap: 16 }}>
+                                    <button onClick={e => { e.stopPropagation(); openEdit(user) }}
+                                      style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', padding: '4px 0' }}>
+                                      Sửa
+                                    </button>
+                                    <button onClick={e => { e.stopPropagation(); handleToggleActive(user) }}
+                                      style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#D97706', cursor: 'pointer', padding: '4px 0' }}>
+                                      {user.active ? 'Tạm khóa' : 'Mở khóa'}
+                                    </button>
+                                    <button onClick={e => { e.stopPropagation(); setDeletingId(user.id) }}
+                                      style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#EF4444', cursor: 'pointer', padding: '4px 0' }}>
+                                      Xóa
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      )
+                    })}
+                  </tbody>
+                </table>
+                </>
+              )
             })()}
           </>
         )}

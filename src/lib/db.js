@@ -27,10 +27,17 @@ db.version(3).stores({
 })
 
 db.on('versionchange', () => { db.close() })
-db.open().catch(Dexie.VersionError, async () => {
+
+async function resetDB() {
   console.warn('[DB] VersionError — xóa DB cũ và mở lại')
   await Dexie.delete('KiemKeDB')
   window.location.reload()
+  return new Promise(() => {}) // treo promise để reload xảy ra
+}
+
+export const dbReady = db.open().catch(err => {
+  if (err.name === 'VersionError' || err.name === 'DatabaseClosedError') return resetDB()
+  throw err
 })
 
 // -----------------------------------------------
@@ -61,10 +68,11 @@ export async function getGoiYVatTu(limit = 20) {
   return rows
 }
 
-export async function updateGoiYVatTu(ma_vt, ten_vt) {
+export async function updateGoiYVatTu(ma_vt, ten_vt, ngoai_so_sach = false) {
   await db.goi_y_vat_tu.put({
     ma_vt,
     ten_vt,
+    ngoai_so_sach,
     lan_kiem_gan_nhat: new Date().toISOString()
   })
 }
@@ -112,7 +120,7 @@ export async function saveChiTietLocal(chitiet) {
   }
 
   await db.chitiet.put(record)
-  await updateGoiYVatTu(chitiet.ma_vt, chitiet.ten_vt)
+  await updateGoiYVatTu(chitiet.ma_vt, chitiet.ten_vt, chitiet.ngoai_so_sach ?? false)
   await addToSyncQueue('chitiet', id, 'insert')
   return record
 }

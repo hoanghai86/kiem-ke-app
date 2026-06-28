@@ -27,7 +27,13 @@ export default function DanhMuc({ inline = false }) {
   const [err, setErr]           = useState('')
   const [deletingId, setDeletingId] = useState(null)
   const [dvtOptions, setDvtOptions] = useState([])
-  const [importing, setImporting]   = useState(false)
+  const [importing, setImporting]     = useState(false)
+  const [selectedId, setSelectedId]   = useState(null)
+  const [confirmDeleteAll, setConfirmDeleteAll]           = useState(false)
+  const [confirmDeleteFiltered, setConfirmDeleteFiltered] = useState(false)
+  const [checkedIds, setCheckedIds]                       = useState(new Set())
+  const [confirmDeleteChecked, setConfirmDeleteChecked]   = useState(false)
+  const [infoMsg, setInfoMsg]                             = useState('')
   const importRef = useRef(null)
 
   const toActive = v => String(v ?? '1').trim() !== '0'
@@ -53,7 +59,7 @@ export default function DanhMuc({ inline = false }) {
     },
   }
 
-  useEffect(() => { loadList(); setSearch(''); closeForm() }, [tab])
+  useEffect(() => { loadList(); setSearch(''); closeForm(); setSelectedId(null); setDeletingId(null); setConfirmDeleteAll(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false); setInfoMsg('') }, [tab])
   useEffect(() => { if (tab === 'vat_tu') loadDvtOptions() }, [tab])
 
   async function loadList() {
@@ -136,10 +142,71 @@ export default function DanhMuc({ inline = false }) {
     }
   }
 
+  async function checkInUse(currentTab, items) {
+    if (!items.length) return new Set()
+    if (currentTab === 'vat_tu') {
+      const keys = items.map(r => r.ma_vt)
+      const [r1, r2] = await Promise.all([
+        supabase.from('kiem_ke_chitiet').select('ma_vt').in('ma_vt', keys),
+        supabase.from('ton_kho').select('ma_vt').in('ma_vt', keys),
+      ])
+      const used = new Set([...(r1.data||[]).map(r=>r.ma_vt), ...(r2.data||[]).map(r=>r.ma_vt)])
+      return new Set(items.filter(r => used.has(r.ma_vt)).map(r => r.id))
+    }
+    if (currentTab === 'dvt') {
+      const keys = items.map(r => r.ma_dvt)
+      const [r1, r2] = await Promise.all([
+        supabase.from('dm_vat_tu').select('ma_dvt_chinh').in('ma_dvt_chinh', keys),
+        supabase.from('ton_kho').select('ma_dvt').in('ma_dvt', keys),
+      ])
+      const used = new Set([
+        ...(r1.data||[]).map(r=>r.ma_dvt_chinh).filter(Boolean),
+        ...(r2.data||[]).map(r=>r.ma_dvt).filter(Boolean),
+      ])
+      return new Set(items.filter(r => used.has(r.ma_dvt)).map(r => r.id))
+    }
+    if (currentTab === 'kho') {
+      const keys = items.map(r => r.ma_kho)
+      const [r1, r2, r3] = await Promise.all([
+        supabase.from('phien_kiem_ke').select('ma_kho').in('ma_kho', keys),
+        supabase.from('kiem_ke_chitiet').select('ma_kho').in('ma_kho', keys),
+        supabase.from('ton_kho').select('ma_kho').in('ma_kho', keys),
+      ])
+      const used = new Set([
+        ...(r1.data||[]).map(r=>r.ma_kho).filter(Boolean),
+        ...(r2.data||[]).map(r=>r.ma_kho).filter(Boolean),
+        ...(r3.data||[]).map(r=>r.ma_kho).filter(Boolean),
+      ])
+      return new Set(items.filter(r => used.has(r.ma_kho)).map(r => r.id))
+    }
+    return new Set()
+  }
+
+  async function bulkDelete(items) {
+    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
+    const inUseIds = await checkInUse(tab, items)
+    const safe = items.filter(r => !inUseIds.has(r.id))
+    if (safe.length > 0) {
+      const { error } = await supabase.from(tableMap[tab]).delete().in('id', safe.map(r => r.id))
+      if (error) throw new Error(error.message)
+      await loadList()
+      await pullDanhMuc()
+    }
+    return { deleted: safe.length, kept: inUseIds.size }
+  }
+
   async function handleDelete(id) {
     const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
+    const item = list.find(r => r.id === id)
+    if (!item) return
     setSaving(true)
     try {
+      const inUseIds = await checkInUse(tab, [item])
+      if (inUseIds.has(id)) {
+        setErr('Không thể xóa: mục này đã có dữ liệu kiểm kê. Dùng "Tạm ẩn" thay thế.')
+        setDeletingId(null)
+        return
+      }
       const { error } = await supabase.from(tableMap[tab]).delete().eq('id', id)
       if (error) throw new Error(error.message)
       await loadList()
@@ -175,6 +242,49 @@ export default function DanhMuc({ inline = false }) {
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href) }, 1000)
   }
 
+  async function handleDeleteFiltered(ids) {
+    setSaving(true)
+    try {
+      const items = list.filter(r => ids.includes(r.id))
+      const { deleted, kept } = await bulkDelete(items)
+      setConfirmDeleteFiltered(false)
+      if (kept === 0) setSearch('')
+      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục đã có dữ liệu kiểm kê.`)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteChecked() {
+    setSaving(true)
+    try {
+      const items = list.filter(r => checkedIds.has(r.id))
+      const { deleted, kept } = await bulkDelete(items)
+      setCheckedIds(new Set())
+      setConfirmDeleteChecked(false)
+      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục đã có dữ liệu kiểm kê.`)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteAll() {
+    setSaving(true)
+    try {
+      const { deleted, kept } = await bulkDelete(list)
+      setConfirmDeleteAll(false)
+      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục đã có dữ liệu kiểm kê.`)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function handleImport(e) {
     const file = e.target.files?.[0]; if (!file) return
     e.target.value = ''
@@ -202,14 +312,15 @@ export default function DanhMuc({ inline = false }) {
     finally { setImporting(false) }
   }
 
-  // Lọc danh sách theo search
-  const kw = search.trim().toLowerCase()
+  // Lọc danh sách theo search — hỗ trợ nhiều từ khóa cách nhau bằng dấu phẩy
+  const terms = search.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
   const filtered = list.filter(r => {
-    if (!kw) return true
-    if (tab === 'kho')    return `${r.ma_kho} ${r.ten_kho}`.toLowerCase().includes(kw)
-    if (tab === 'dvt')    return `${r.ma_dvt} ${r.ten_dvt}`.toLowerCase().includes(kw)
-    if (tab === 'vat_tu') return `${r.ma_vt} ${r.ten_vt}`.toLowerCase().includes(kw)
-    return true
+    if (!terms.length) return true
+    const text = tab === 'kho'    ? `${r.ma_kho} ${r.ten_kho}`
+               : tab === 'dvt'    ? `${r.ma_dvt} ${r.ten_dvt}`
+               : `${r.ma_vt} ${r.ten_vt}`
+    const lower = text.toLowerCase()
+    return terms.some(t => lower.includes(t))
   })
 
   // ── Form sub-screen ──────────────────────────────────────────────
@@ -334,80 +445,197 @@ export default function DanhMuc({ inline = false }) {
 
       <div className="content">
         {err && <div className="error-box" onClick={() => setErr('')}>{err} ✕</div>}
+        {infoMsg && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+            <div style={{ background: '#fff', borderRadius: 14, padding: 24, maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+              <div style={{ fontSize: 36, textAlign: 'center', marginBottom: 10 }}>✅</div>
+              <div style={{ fontSize: 15, fontWeight: 700, textAlign: 'center', marginBottom: 8, color: 'var(--text)' }}>Kết quả xóa</div>
+              <div style={{ fontSize: 14, color: 'var(--text)', textAlign: 'center', lineHeight: 1.6, marginBottom: 20 }}>{infoMsg}</div>
+              <button onClick={() => setInfoMsg('')} style={{ width: '100%', padding: '11px', borderRadius: 8, border: 'none', background: 'var(--green)', color: '#fff', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>OK</button>
+            </div>
+          </div>
+        )}
 
-        <button className="btn-primary" onClick={openCreate} style={{ width: '100%', marginBottom: 8 }}>
-          + Thêm {countLabel[tab]}
-        </button>
-        <div className="row-2col" style={{ marginBottom: 10 }}>
-          <button className="btn-secondary" onClick={handleExport} disabled={!list.length}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <button className="btn-primary" onClick={openCreate} style={{ flex: 1, fontSize: 13 }}>
+            + Thêm
+          </button>
+          <button className="btn-secondary" onClick={handleExport} disabled={!list.length} style={{ flex: 1, fontSize: 13 }}>
             ⬇ Export
           </button>
-          <button className="btn-secondary" onClick={() => importRef.current?.click()} disabled={importing}>
-            {importing ? 'Đang import...' : '⬆ Import'}
+          <button className="btn-secondary" onClick={() => importRef.current?.click()} disabled={importing} style={{ flex: 1, fontSize: 13 }}>
+            {importing ? '...' : '⬆ Import'}
+          </button>
+          <button onClick={() => setConfirmDeleteAll(v => !v)} disabled={!list.length}
+            style={{ flex: 1, fontSize: 13, borderRadius: 8, border: '1px solid #FECACA', background: confirmDeleteAll ? '#EF4444' : '#FEF2F2', color: confirmDeleteAll ? '#fff' : '#DC2626', cursor: 'pointer' }}>
+            🗑 Xóa danh mục
           </button>
         </div>
         <input ref={importRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleImport} />
 
-        <input className="input-field" placeholder="Tìm kiếm..." value={search}
-          onChange={e => setSearch(e.target.value)} style={{ marginBottom: 12 }} />
+        {confirmDeleteAll && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+            <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa toàn bộ {list.length} {countLabel[tab]}?</span>
+            <button onClick={handleDeleteAll} disabled={saving}
+              style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              {saving ? '...' : 'Xóa hết'}
+            </button>
+            <button onClick={() => setConfirmDeleteAll(false)}
+              style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+              Hủy
+            </button>
+          </div>
+        )}
+
+        <input className="input-field" placeholder="Tìm kiếm... (nhiều mã cách nhau bằng dấu phẩy)" value={search}
+          onChange={e => { setSearch(e.target.value); setConfirmDeleteFiltered(false) }} style={{ marginBottom: terms.length && filtered.length ? 6 : 12 }} />
+
+        {terms.length > 0 && filtered.length > 0 && (
+          confirmDeleteFiltered ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+              <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {filtered.length} mục đang lọc?</span>
+              <button onClick={() => handleDeleteFiltered(filtered.map(r => r.id))} disabled={saving}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {saving ? '...' : 'Xóa'}
+              </button>
+              <button onClick={() => setConfirmDeleteFiltered(false)}
+                style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                Hủy
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filtered.length} kết quả</span>
+              <button onClick={() => setConfirmDeleteFiltered(true)}
+                style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                Xóa {filtered.length} mục này
+              </button>
+            </div>
+          )
+        )}
+
+        {checkedIds.size > 0 && (
+          confirmDeleteChecked ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA' }}>
+              <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {checkedIds.size} mục đã chọn?</span>
+              <button onClick={handleDeleteChecked} disabled={saving}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                {saving ? '...' : 'Xóa'}
+              </button>
+              <button onClick={() => setConfirmDeleteChecked(false)}
+                style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                Hủy
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', marginBottom: 10, borderRadius: 8, background: '#F0FDF4', border: '1px solid #D1FAE5' }}>
+              <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Đã chọn {checkedIds.size} mục</span>
+              <button onClick={() => setCheckedIds(new Set())}
+                style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>
+                Bỏ chọn
+              </button>
+              <button onClick={() => setConfirmDeleteChecked(true)}
+                style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                Xóa đã chọn ({checkedIds.size})
+              </button>
+            </div>
+          )
+        )}
 
         {loading ? (
           <div className="empty-state">Đang tải...</div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">Không có dữ liệu</div>
-        ) : filtered.map(item => {
-          const id = item.id
-          const ma   = tab === 'kho' ? item.ma_kho : tab === 'dvt' ? item.ma_dvt : item.ma_vt
-          const name = tab === 'kho' ? item.ten_kho : tab === 'dvt' ? item.ten_dvt : item.ten_vt
-          const sub  = tab === 'vat_tu' && item.ma_dvt_chinh ? `DVT: ${item.ma_dvt_chinh}` : null
-
-          return (
-            <div key={id} className="phien-card" style={{ opacity: item.active ? 1 : 0.55 }}>
-              <div className="phien-card-top">
-                <div className="phien-card-info">
-                  <div className="phien-card-kho">{name}</div>
-                  <div className="phien-card-meta">
-                    {ma}{sub ? ` · ${sub}` : ''}
-                  </div>
-                </div>
-                <span style={{
-                  fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4,
-                  background: item.active ? '#D1FAE5' : '#F3F4F6',
-                  color: item.active ? '#065F46' : '#6B7280'
-                }}>
-                  {item.active ? 'Hoạt động' : 'Tạm ẩn'}
-                </span>
-              </div>
-
-              {deletingId === id && (
-                <div style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', background: '#FEF2F2', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ flex: 1, fontSize: 13, color: '#991B1B' }}>Xác nhận xóa {name}?</span>
-                  <button className="btn-primary" style={{ background: '#EF4444', border: 'none', height: 30, fontSize: 12, padding: '0 12px' }}
-                    onClick={() => handleDelete(id)} disabled={saving}>
-                    {saving ? '...' : 'Xóa'}
-                  </button>
-                  <button className="btn-secondary" style={{ height: 30, fontSize: 12, padding: '0 12px' }}
-                    onClick={() => setDeletingId(null)}>Hủy</button>
-                </div>
-              )}
-
-              <div className="phien-card-actions-full">
-                {[
-                  { label: 'Sửa',    onClick: () => openEdit(item),              color: 'var(--text)' },
-                  { label: item.active ? 'Tạm ẩn' : 'Hiện', onClick: () => handleToggleActive(item), color: 'var(--orange-dark)' },
-                  { label: deletingId === id ? 'Đóng' : 'Xóa',
-                    onClick: () => setDeletingId(deletingId === id ? null : id),  color: '#EF4444' }
-                ].map(({ label, onClick, color }) => (
-                  <button key={label} onClick={onClick} style={{
-                    flex: 1, padding: '9px 4px', border: 'none', background: 'none',
-                    fontSize: 12, fontWeight: 500, color, cursor: 'pointer',
-                    borderRight: '1px solid var(--border)'
-                  }}>{label}</button>
-                ))}
-              </div>
-            </div>
-          )
-        })}
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                <th style={{ padding: '8px 6px', textAlign: 'center', width: 36 }}>
+                  <input type="checkbox"
+                    checked={filtered.length > 0 && filtered.every(r => checkedIds.has(r.id))}
+                    onChange={e => {
+                      if (e.target.checked) setCheckedIds(new Set(filtered.map(r => r.id)))
+                      else setCheckedIds(new Set())
+                    }} />
+                </th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>Mã</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Tên</th>
+                {tab === 'vat_tu' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>ĐVT</th>}
+                <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(item => {
+                const id      = item.id
+                const ma      = tab === 'kho' ? item.ma_kho : tab === 'dvt' ? item.ma_dvt : item.ma_vt
+                const name    = tab === 'kho' ? item.ten_kho : tab === 'dvt' ? item.ten_dvt : item.ten_vt
+                const colSpan = tab === 'vat_tu' ? 5 : 4
+                const isSel   = selectedId === id
+                const isChk   = checkedIds.has(id)
+                return (
+                  <>
+                    <tr key={id} onClick={() => { setSelectedId(isSel ? null : id); setDeletingId(null) }}
+                      style={{ cursor: 'pointer', opacity: item.active ? 1 : 0.55, background: isSel ? '#F0FDF4' : isChk ? '#FAFFF5' : 'white', borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '10px 6px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={isChk}
+                          onChange={e => {
+                            setCheckedIds(prev => {
+                              const next = new Set(prev)
+                              e.target.checked ? next.add(id) : next.delete(id)
+                              return next
+                            })
+                          }} />
+                      </td>
+                      <td style={{ padding: '10px 10px', fontWeight: 700, color: 'var(--green)', whiteSpace: 'nowrap' }}>{ma}</td>
+                      <td style={{ padding: '10px 10px' }}>{name}</td>
+                      {tab === 'vat_tu' && <td style={{ padding: '10px 10px', color: 'var(--text-muted)' }}>{item.ma_dvt_chinh || '—'}</td>}
+                      <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
+                          background: item.active ? '#D1FAE5' : '#F3F4F6', color: item.active ? '#065F46' : '#6B7280' }}>
+                          {item.active ? 'HĐ' : 'Ẩn'}
+                        </span>
+                      </td>
+                    </tr>
+                    {isSel && (
+                      <tr key={`${id}_sel`} style={{ background: '#F0FDF4' }}>
+                        <td colSpan={colSpan} style={{ padding: '8px 10px', borderBottom: '1px solid #D1FAE5' }}>
+                          {deletingId === id ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ flex: 1, fontSize: 13, color: '#991B1B' }}>Xác nhận xóa?</span>
+                              <button onClick={e => { e.stopPropagation(); handleDelete(id) }} disabled={saving}
+                                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                                {saving ? '...' : 'Xóa'}
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); setDeletingId(null) }}
+                                style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                                Hủy
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', gap: 16 }}>
+                              <button onClick={e => { e.stopPropagation(); openEdit(item) }}
+                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', padding: '4px 0' }}>
+                                Sửa
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); handleToggleActive(item) }}
+                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#D97706', cursor: 'pointer', padding: '4px 0' }}>
+                                {item.active ? 'Tạm ẩn' : 'Hiện'}
+                              </button>
+                              <button onClick={e => { e.stopPropagation(); setDeletingId(id) }}
+                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#EF4444', cursor: 'pointer', padding: '4px 0' }}>
+                                Xóa
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   )

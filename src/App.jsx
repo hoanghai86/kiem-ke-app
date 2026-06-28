@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabase'
-import { db, clearSyncQueue } from './lib/db'
+import { db, clearSyncQueue, dbReady } from './lib/db'
 import { pullDanhMuc, pushOfflineQueue, subscribeVatTuRealtime } from './lib/sync'
 import BatDauPhien from './screens/BatDauPhien'
 import KiemKe from './screens/KiemKe'
@@ -33,17 +33,20 @@ export default function App() {
   const unsubVatTu = useRef(null)
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session) {
-        const profile = await resolveProfile(session.user.id)
-        setUser(profile)
-        if (navigator.onLine) pullDanhMuc()
-        unsubVatTu.current = subscribeVatTuRealtime()
-      }
-      setLoading(false)
+    dbReady.then(() => {
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (session) {
+          const profile = await resolveProfile(session.user.id)
+          setUser(profile)
+          if (navigator.onLine) pullDanhMuc()
+          unsubVatTu.current = subscribeVatTuRealtime()
+        }
+        setLoading(false)
+      })
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      await dbReady
       if (session) {
         const profile = await resolveProfile(session.user.id)
         setUser(profile)
@@ -128,7 +131,18 @@ function SyncButton() {
     const onOffline = () => { setOnline(false); refreshCount() }
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
-    const timer = setInterval(refreshCount, 3000)
+
+    // Refresh count mỗi 3s; nếu có pending và online thì auto-retry sync mỗi 10s
+    let tick = 0
+    const timer = setInterval(async () => {
+      tick++
+      await refreshCount()
+      if (tick % 3 === 0 && navigator.onLine && !isSyncing.current) {
+        const cnt = await db.sync_queue.count()
+        if (cnt > 0) pushOfflineQueue()
+      }
+    }, 3000)
+
     return () => {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)

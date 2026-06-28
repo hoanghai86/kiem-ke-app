@@ -304,7 +304,8 @@ export default function BatDauPhien({ currentUser }) {
     return true
   })
 
-  const hasFilters = Object.values(filters).some(v => v !== '')
+  const activeFilterCount = Object.values(filters).filter(v => v !== '').length
+  const hasFilters = activeFilterCount > 0
 
   function clearFilters() {
     setFilters({ keToanId: '', thuKhoId: '', tuNgay: '', denNgay: '', trangThai: '' })
@@ -399,16 +400,23 @@ export default function BatDauPhien({ currentUser }) {
 
       <div className="content">
         {/* Filter toggle + Tạo mới cùng hàng */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn-filter-toggle" onClick={() => setShowFilters(v => !v)}>
-              Bộ lọc {hasFilters ? '●' : ''} {showFilters ? '▲' : '▼'}
-            </button>
-            {hasFilters && (
-              <button className="btn-clear-filter" onClick={clearFilters}>Xóa lọc</button>
-            )}
-          </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
           <button className="btn-sm-outline" onClick={openCreate}>+ Tạo phiên</button>
+          <span style={{ flex: 1, fontSize: 13, color: 'var(--text-muted)' }}>{filtered.length} phiên</span>
+          {hasFilters && (
+            <button onClick={clearFilters} style={{
+              border: 'none', background: 'none', color: 'var(--green)',
+              fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap'
+            }}>Xóa lọc</button>
+          )}
+          <button onClick={() => setShowFilters(v => !v)} style={{
+            padding: '0 16px', height: 38, borderRadius: 8, border: '1px solid var(--border)',
+            background: hasFilters ? 'var(--green)' : '#fff',
+            color: hasFilters ? '#fff' : 'var(--text)',
+            fontWeight: 500, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap'
+          }}>
+            Lọc{hasFilters ? ` (${activeFilterCount})` : ''} {showFilters ? '▲' : '▼'}
+          </button>
         </div>
 
         {/* Filter panel */}

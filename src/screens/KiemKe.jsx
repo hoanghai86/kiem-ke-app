@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { db, saveChiTietLocal, getSoSach, deleteChiTiet, updateChiTiet } from '../lib/db'
 import { supabase } from '../lib/supabase'
-import { pushOfflineQueue } from '../lib/sync'
+import { pushOfflineQueue, syncChiTietNow } from '../lib/sync'
 import ChonVatTu from '../components/ChonVatTu'
 
 export default function KiemKe({ currentUser }) {
@@ -17,6 +17,7 @@ export default function KiemKe({ currentUser }) {
 
   // Form state
   const [vatTuCoDinh, setVatTuCoDinh] = useState(null) // { ma_vt, ten_vt }
+  const [autoOpenVt, setAutoOpenVt]   = useState(false)
   const [dvt, setDvt] = useState('')
   const [heSo, setHeSo] = useState(1)
   const [soLuong, setSoLuong] = useState('')
@@ -37,6 +38,18 @@ export default function KiemKe({ currentUser }) {
   const [editItem, setEditItem] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [editSaving, setEditSaving] = useState(false)
+  const [checkedIds, setCheckedIds] = useState(new Set())
+  const [confirmDeleteChecked, setConfirmDeleteChecked] = useState(false)
+
+  // Kho fullscreen modal
+  const [openKhoModal, setOpenKhoModal] = useState(false)
+  const [khoQuery, setKhoQuery] = useState('')
+  const khoSearchRef = useRef(null)
+
+  // DVT fullscreen modal
+  const [openDvtModal, setOpenDvtModal] = useState(false)
+  const [dvtQuery, setDvtQuery] = useState('')
+  const dvtSearchRef = useRef(null)
 
   // Persist kho + vatTu sang sessionStorage để nhớ khi quay lại
   useEffect(() => {
@@ -83,6 +96,22 @@ export default function KiemKe({ currentUser }) {
         vtList.forEach(v => { if (v.ma_dvt_chinh) localDvtMap[v.ma_vt] = v.ma_dvt_chinh })
       }
       setDvtChinhMap(localDvtMap)
+
+      // Pull chitiet từ Supabase (hỗ trợ tab mới / ẩn danh / thiết bị khác)
+      if (navigator.onLine) {
+        const { data: remoteRows } = await supabase
+          .from('kiem_ke_chitiet')
+          .select('*')
+          .eq('phien_id', phienId)
+        if (remoteRows?.length) {
+          const localRows = await db.chitiet.where('phien_id').equals(phienId).toArray()
+          const localUnsyncedIds = new Set(localRows.filter(r => !r.synced).map(r => r.id))
+          const toStore = remoteRows
+            .filter(r => !localUnsyncedIds.has(r.id))
+            .map(r => ({ ...r, synced: true }))
+          if (toStore.length) await db.chitiet.bulkPut(toStore)
+        }
+      }
 
       await loadDanhSach()
 
@@ -177,7 +206,7 @@ export default function KiemKe({ currentUser }) {
     if (!vatTuCoDinh || !soLuong || !maKhoHienTai) return
     setSaving(true)
 
-    await saveChiTietLocal({
+    const record = await saveChiTietLocal({
       id: crypto.randomUUID(),
       phien_id: phienId,
       ma_vt: vatTuCoDinh.ma_vt,
@@ -195,24 +224,48 @@ export default function KiemKe({ currentUser }) {
       ngoai_so_sach: vatTuCoDinh.ngoai_so_sach ?? false
     })
 
-    if (navigator.onLine) pushOfflineQueue()
+    if (navigator.onLine) pushOfflineQueue()  // có lock, không chạy đồng thời dù bấm liên tục
     await loadDanhSach()
 
     setSoLuong('')
     setGhiChu('')
     setSaving(false)
-    setTimeout(() => soLuongRef.current?.focus(), 100)
+    setTimeout(() => soLuongRef.current?.focus(), 50)
   }
 
   function handleHuy() {
+    setVatTuCoDinh(null)
     setSoLuong('')
+    setHeSo(1)
     setGhiChu('')
+    setSoSach(null)
+    setDvt('')
+  }
+
+  async function handleSelectKho(newKho) {
+    setMaKhoHienTai(newKho)
+    setOpenKhoModal(false)
+    setKhoQuery('')
+    if (newKho && navigator.onLine) {
+      const { data } = await supabase.from('ton_kho').select('*').eq('ma_kho', newKho)
+      if (data?.length) await db.ton_kho.bulkPut(data)
+    }
+    if (vatTuCoDinh && newKho) {
+      const ss = await getSoSach(vatTuCoDinh.ma_vt, newKho)
+      setSoSach(ss)
+    } else {
+      setSoSach(null)
+    }
   }
 
   async function handleDeleteItem(id) {
     if (!window.confirm('Xóa dòng này?')) return
-    await deleteChiTiet(id)
-    if (navigator.onLine) pushOfflineQueue()
+    if (navigator.onLine) {
+      await supabase.from('kiem_ke_chitiet').delete().eq('id', id)
+      await db.chitiet.delete(id)
+    } else {
+      await deleteChiTiet(id)
+    }
     await loadDanhSach()
   }
 
@@ -221,6 +274,19 @@ export default function KiemKe({ currentUser }) {
     for (const item of danhSach) await deleteChiTiet(item.id)
     if (navigator.onLine) pushOfflineQueue()
     await loadDanhSach()
+  }
+
+  async function handleDeleteChecked() {
+    const ids = [...checkedIds]
+    if (navigator.onLine) {
+      await supabase.from('kiem_ke_chitiet').delete().in('id', ids)
+      for (const id of ids) await db.chitiet.delete(id)
+    } else {
+      for (const id of ids) await deleteChiTiet(id)
+    }
+    await loadDanhSach()
+    setCheckedIds(new Set())
+    setConfirmDeleteChecked(false)
   }
 
   async function handleUpdateItem() {
@@ -245,7 +311,7 @@ export default function KiemKe({ currentUser }) {
   const khoMap = Object.fromEntries(danhMucKho.map(k => [k.ma_kho, k.ten_kho]))
   const dvtNameMap = Object.fromEntries(danhMucDvt.map(d => [d.ma_dvt, d.ten_dvt]))
 
-  function renderItemRow(item) {
+  function renderItemRow(item, actions = null) {
     const tenDvtKiem = dvtNameMap[item.ma_dvt_kiem] || item.ma_dvt_kiem || ''
     const maDvtChinh = dvtChinhMap[item.ma_vt]
     const tenDvtChinh = maDvtChinh ? (dvtNameMap[maDvtChinh] || maDvtChinh) : tenDvtKiem
@@ -258,24 +324,38 @@ export default function KiemKe({ currentUser }) {
       <div key={item.id} className="item-row">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
           <div className="item-name" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            <span className="item-code">{item.ma_vt}</span> · {item.ten_vt}
+            <span className="item-code">{item.ma_vt}</span>
+            <span style={{ color: 'var(--text-muted)', margin: '0 3px' }}>·</span>
+            <span style={{ fontWeight: 600, color: '#1a56db' }}>{item.ten_vt}</span>
           </div>
-          <div style={{ fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
-            {soQD} {tenDvtChinh}
+          <div style={{ flexShrink: 0, fontWeight: 700, fontSize: 15, color: '#DB2777' }}>
+            {soQD} <span style={{ fontSize: 11, fontWeight: 700 }}>{tenDvtChinh}</span>
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2, gap: 8 }}>
           <div className="item-meta">
-            {showConv
-              ? `${item.so_luong_thuc_te} ${tenDvtKiem} × ${heSo} = ${soQD} ${tenDvtChinh}`
-              : `${item.so_luong_thuc_te} ${tenDvtKiem}`}
+            {showConv ? (
+              <>
+                <span style={{ color: '#7C3AED', fontWeight: 700 }}>{item.so_luong_thuc_te}</span><span style={{ color: '#7C3AED', fontWeight: 600 }}> {tenDvtKiem}</span>
+                <span style={{ color: 'var(--text-muted)' }}> × {heSo} = </span>
+                <span style={{ color: '#DB2777', fontWeight: 600 }}>{soQD} {tenDvtChinh}</span>
+              </>
+            ) : (
+              <>
+                <span style={{ color: '#7C3AED', fontWeight: 700 }}>{item.so_luong_thuc_te}</span>
+                <span style={{ color: '#7C3AED', fontWeight: 600 }}> {tenDvtKiem}</span>
+              </>
+            )}
           </div>
           <span className="lot-tag">Lượt {item.luot_kiem}</span>
         </div>
-        <div className="item-meta" style={{ marginTop: 2 }}>
-          {tenKho ? `Kho ${tenKho} · ` : ''}{gio}
-          {item.ghi_chu ? ` · ${item.ghi_chu}` : ''}
-          {!item.synced ? ' · ⏳' : ''}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+          <div className="item-meta">
+            {tenKho ? `${tenKho} · ` : ''}{gio}
+            {item.ghi_chu ? ` · ${item.ghi_chu}` : ''}
+            {!item.synced ? ' · ⏳' : ''}
+          </div>
+          {actions}
         </div>
       </div>
     )
@@ -301,7 +381,7 @@ export default function KiemKe({ currentUser }) {
 
         {/* Toolbar */}
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', gap: 8 }}>
-          <button className="btn-secondary" onClick={() => setXemDanhSach(false)}
+          <button className="btn-secondary" onClick={() => { setXemDanhSach(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false) }}
             style={{ flex: 1, color: 'var(--green-dark)', borderColor: 'var(--green)', fontWeight: 600, height: 36 }}>
             ← Quay lại
           </button>
@@ -361,23 +441,75 @@ export default function KiemKe({ currentUser }) {
           </div>
         )}
 
+        {/* Selection bar */}
+        {checkedIds.size > 0 && (
+          confirmDeleteChecked ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', background: '#FEF2F2', borderBottom: '1px solid #FECACA' }}>
+              <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {checkedIds.size} dòng đã chọn?</span>
+              <button onClick={handleDeleteChecked}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                Xóa
+              </button>
+              <button onClick={() => setConfirmDeleteChecked(false)}
+                style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>
+                Hủy
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: '#F0FDF4', borderBottom: '1px solid #D1FAE5' }}>
+              <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Đã chọn {checkedIds.size} dòng</span>
+              <button onClick={() => setCheckedIds(new Set())}
+                style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>
+                Bỏ chọn
+              </button>
+              <button onClick={() => setConfirmDeleteChecked(true)}
+                style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                Xóa đã chọn ({checkedIds.size})
+              </button>
+            </div>
+          )
+        )}
+
         {/* Danh sách */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px' }}>
           {danhSachLoc.length === 0 && (
             <div className="empty-state">{hasFilter ? 'Không có kết quả phù hợp' : 'Chưa có dòng nào được nhập'}</div>
           )}
+          {danhSachLoc.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '2px solid var(--border)' }}>
+              <input type="checkbox"
+                checked={danhSachLoc.every(r => checkedIds.has(r.id))}
+                onChange={e => {
+                  if (e.target.checked) setCheckedIds(new Set(danhSachLoc.map(r => r.id)))
+                  else setCheckedIds(new Set())
+                }}
+                style={{ marginRight: 10 }} />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Chọn tất cả ({danhSachLoc.length})</span>
+            </div>
+          )}
           {danhSachLoc.map(item => (
-            <div key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
-              {renderItemRow(item)}
-              <div style={{ display: 'flex', gap: 0, marginTop: -4, marginBottom: 8 }}>
-                <button onClick={() => { setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '' }) }}
-                  style={{ flex: 1, padding: '6px', fontSize: 13, border: '1px solid var(--border)', borderRight: 'none', borderRadius: '6px 0 0 6px', background: '#fff', color: '#1a56db', cursor: 'pointer', fontWeight: 500 }}>
-                  Sửa
-                </button>
-                <button onClick={() => handleDeleteItem(item.id)}
-                  style={{ flex: 1, padding: '6px', fontSize: 13, border: '1px solid #FCA5A5', borderRadius: '0 6px 6px 0', background: '#FEF2F2', color: '#DC2626', cursor: 'pointer', fontWeight: 500 }}>
-                  Xóa
-                </button>
+            <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', background: checkedIds.has(item.id) ? '#F0FDF4' : 'transparent' }}>
+              <div style={{ paddingTop: 13, paddingRight: 8, flexShrink: 0 }}>
+                <input type="checkbox" checked={checkedIds.has(item.id)}
+                  onChange={e => setCheckedIds(prev => {
+                    const next = new Set(prev)
+                    e.target.checked ? next.add(item.id) : next.delete(item.id)
+                    return next
+                  })} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {renderItemRow(item, (
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    <button
+                      onClick={() => { setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '' }) }}
+                      style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#1a56db', lineHeight: 1 }}
+                      title="Sửa">✏️</button>
+                    <button
+                      onClick={() => handleDeleteItem(item.id)}
+                      style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#DC2626', lineHeight: 1 }}
+                      title="Xóa">🗑️</button>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
@@ -443,12 +575,16 @@ export default function KiemKe({ currentUser }) {
         background: '#fff', borderBottom: '1px solid var(--border)',
         padding: '8px 16px', display: 'flex', gap: 8
       }}>
-        <button className="btn-secondary" onClick={handleHuy} disabled={saving}
+        <button className="btn-secondary" onClick={() => navigate('/')}
           style={{ flex: 1, height: 40 }}>
           Hủy
         </button>
+        <button className="btn-secondary" onClick={handleHuy} disabled={saving}
+          style={{ flex: 1, height: 40 }}>
+          Xóa
+        </button>
         <button className="btn-primary" onClick={handleLuu}
-          style={{ flex: 1, height: 40 }}
+          style={{ flex: 2, height: 40 }}
           disabled={!vtHienTai || !soLuong || !maKhoHienTai || saving || phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho}>
           {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
         </button>
@@ -468,29 +604,71 @@ export default function KiemKe({ currentUser }) {
         {/* Kho đang kiểm + Đếm lại — cùng hàng */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
           <label className="field-label" style={{ flexShrink: 0, marginBottom: 0 }}>Kho đang kiểm</label>
-          <select className="input-select" style={{ flex: 1 }} value={maKhoHienTai}
-            onChange={async e => {
-              const newKho = e.target.value
-              setMaKhoHienTai(newKho)
-              if (newKho && navigator.onLine) {
-                const { data } = await supabase.from('ton_kho').select('*').eq('ma_kho', newKho)
-                if (data?.length) await db.ton_kho.bulkPut(data)
-              }
-              if (vatTuCoDinh && newKho) {
-                const ss = await getSoSach(vatTuCoDinh.ma_vt, newKho)
-                setSoSach(ss)
-              } else {
-                setSoSach(null)
-              }
+          <div onClick={() => { setOpenKhoModal(true); setTimeout(() => khoSearchRef.current?.focus(), 100) }}
+            style={{
+              flex: 1, padding: '10px 12px', border: '1.5px solid var(--border)',
+              borderRadius: 10, fontSize: 15, background: '#fff',
+              color: maKhoHienTai ? 'var(--text)' : 'var(--text-muted)',
+              cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center'
             }}>
-            <option value="">-- Chọn kho --</option>
-            {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
-          </select>
+            {maKhoHienTai ? khoMap[maKhoHienTai] || maKhoHienTai : 'Chọn kho...'}
+          </div>
           <button className="mode-tab active" onClick={() => navigate(`/dem-lai/${phienId}`)}
             style={{ flexShrink: 0, fontWeight: 700, height: 40, alignSelf: 'center' }}>
             ✓ Đếm lại
           </button>
         </div>
+
+        {/* Fullscreen modal chọn kho */}
+        {openKhoModal && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 300,
+            background: '#fff', display: 'flex', flexDirection: 'column',
+            maxWidth: 480, margin: '0 auto'
+          }}>
+            <div style={{
+              padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center',
+              borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0
+            }}>
+              <input
+                ref={khoSearchRef}
+                type="text"
+                className="input-field"
+                placeholder="Tìm kho..."
+                value={khoQuery}
+                onChange={e => setKhoQuery(e.target.value)}
+                style={{ flex: 1, margin: 0 }}
+              />
+              <button onClick={() => { setKhoQuery(''); khoSearchRef.current?.focus() }} style={{
+                padding: '8px 12px', border: 'none', background: 'none',
+                color: 'var(--text-muted)', fontSize: 15, cursor: 'pointer', flexShrink: 0
+              }}>Xóa</button>
+              <button onClick={() => { setOpenKhoModal(false); setKhoQuery('') }} style={{
+                padding: '8px 12px', border: 'none', background: 'none',
+                color: 'var(--text-muted)', fontSize: 15, cursor: 'pointer', flexShrink: 0
+              }}>Hủy</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {danhMucKho
+                .filter(k => !khoQuery.trim() || k.ten_kho.toLowerCase().includes(khoQuery.toLowerCase()) || k.ma_kho.toLowerCase().includes(khoQuery.toLowerCase()))
+                .map(k => (
+                  <div key={k.ma_kho} onClick={() => handleSelectKho(k.ma_kho)} style={{
+                    padding: '14px 16px', borderBottom: '1px solid #F3F4F6',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                    background: k.ma_kho === maKhoHienTai ? '#F0FDF4' : '#fff'
+                  }}>
+                    <span style={{
+                      background: '#E6F4EF', color: 'var(--green)', borderRadius: 6,
+                      padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0
+                    }}>{k.ma_kho}</span>
+                    <span style={{ fontSize: 15, fontWeight: k.ma_kho === maKhoHienTai ? 600 : 400 }}>{k.ten_kho}</span>
+                    {k.ma_kho === maKhoHienTai && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+        )}
 
         {/* Chọn mã vật tư */}
         {vatTuCoDinh ? (
@@ -499,12 +677,13 @@ export default function KiemKe({ currentUser }) {
               <div className="chip-name">{vatTuCoDinh.ma_vt} · {vatTuCoDinh.ten_vt}</div>
               <div className="chip-meta">Đang đếm mã này</div>
             </div>
-            <button className="chip-change" onClick={() => handleChonVatTuCoDinh(null)}>
+            <button className="chip-change" onClick={() => { setAutoOpenVt(true); handleChonVatTuCoDinh(null) }}>
               Đổi mã
             </button>
           </div>
         ) : (
-          <ChonVatTu value={null} onSelect={handleChonVatTuCoDinh} />
+          <ChonVatTu value={null} autoOpen={autoOpenVt}
+            onSelect={vt => { setAutoOpenVt(false); handleChonVatTuCoDinh(vt) }} />
         )}
 
         {/* Hàng 1: Số lượng + ĐVT + Hệ số */}
@@ -520,13 +699,66 @@ export default function KiemKe({ currentUser }) {
           </div>
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">ĐVT</label>
-            <select className="input-select" value={dvt} onChange={e => setDvt(e.target.value)}>
-              <option value="">-- Chọn --</option>
-              {danhMucDvt.map(d => (
-                <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>
-              ))}
-            </select>
+            <div onClick={() => { setOpenDvtModal(true); setTimeout(() => dvtSearchRef.current?.focus(), 100) }}
+              style={{
+                padding: '10px 12px', border: '1.5px solid var(--border)',
+                borderRadius: 10, fontSize: 15, background: '#fff',
+                color: dvt ? 'var(--text)' : 'var(--text-muted)',
+                cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center'
+              }}>
+              {dvt ? (danhMucDvt.find(d => d.ma_dvt === dvt)?.ten_dvt || dvt) : 'Chọn...'}
+            </div>
           </div>
+
+          {openDvtModal && (
+            <div style={{
+              position: 'fixed', inset: 0, zIndex: 300,
+              background: '#fff', display: 'flex', flexDirection: 'column',
+              maxWidth: 480, margin: '0 auto'
+            }}>
+              <div style={{
+                padding: '10px 12px', display: 'flex', gap: 8, alignItems: 'center',
+                borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0
+              }}>
+                <input
+                  ref={dvtSearchRef}
+                  type="text"
+                  className="input-field"
+                  placeholder="Tìm đơn vị tính..."
+                  value={dvtQuery}
+                  onChange={e => setDvtQuery(e.target.value)}
+                  style={{ flex: 1, margin: 0 }}
+                />
+                <button onClick={() => { setDvtQuery(''); dvtSearchRef.current?.focus() }} style={{
+                  padding: '8px 12px', border: 'none', background: 'none',
+                  color: 'var(--text-muted)', fontSize: 15, cursor: 'pointer', flexShrink: 0
+                }}>Xóa</button>
+                <button onClick={() => { setOpenDvtModal(false); setDvtQuery('') }} style={{
+                  padding: '8px 12px', border: 'none', background: 'none',
+                  color: 'var(--text-muted)', fontSize: 15, cursor: 'pointer', flexShrink: 0
+                }}>Hủy</button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {danhMucDvt
+                  .filter(d => !dvtQuery.trim() || d.ten_dvt.toLowerCase().includes(dvtQuery.toLowerCase()) || d.ma_dvt.toLowerCase().includes(dvtQuery.toLowerCase()))
+                  .map(d => (
+                    <div key={d.ma_dvt} onClick={() => { setDvt(d.ma_dvt); setOpenDvtModal(false); setDvtQuery('') }} style={{
+                      padding: '14px 16px', borderBottom: '1px solid #F3F4F6',
+                      cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                      background: d.ma_dvt === dvt ? '#F0FDF4' : '#fff'
+                    }}>
+                      <span style={{
+                        background: '#E6F4EF', color: 'var(--green)', borderRadius: 6,
+                        padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0
+                      }}>{d.ma_dvt}</span>
+                      <span style={{ fontSize: 15, fontWeight: d.ma_dvt === dvt ? 600 : 400 }}>{d.ten_dvt}</span>
+                      {d.ma_dvt === dvt && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
+                    </div>
+                  ))
+                }
+              </div>
+            </div>
+          )}
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Hệ số</label>
             <input type="number" className="input-field" value={heSo}

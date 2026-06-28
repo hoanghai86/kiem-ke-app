@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { db, updateChiTiet, deleteChiTiet, getSoSach } from '../lib/db'
 import { pushOfflineQueue } from '../lib/sync'
@@ -52,7 +52,7 @@ const getToday = () => {
 const INIT_FILTERS = () => ({
   tuNgay: getToday(), denNgay: getToday(),
   loaiDuLieu: 'ke_toan',
-  kho: 'all', phien: 'all', keToan: 'all', thuKho: 'all', vatTu: '',
+  kho: [], phien: [], keToan: [], thuKho: [], vatTu: [],
 })
 
 export default function BaoCao({ currentUser }) {
@@ -81,6 +81,21 @@ export default function BaoCao({ currentUser }) {
   const [nssItems, setNssItems]         = useState([])
   const [loadingNSS, setLoadingNSS]     = useState(false)
   const [reconcileItem, setReconcileItem] = useState(null)
+  const [toastMsg, setToastMsg]         = useState(null)
+
+  // Filter fullscreen modal
+  const [filterModal, setFilterModal] = useState(null) // null | 'phien' | 'kho' | 'keToan' | 'thuKho'
+  const [filterModalQ, setFilterModalQ] = useState('')
+  const [filterModalSel, setFilterModalSel] = useState([])
+  const filterModalRef = useRef(null)
+
+  // Vật tư filter fullscreen modal
+  const [openVatTuModal, setOpenVatTuModal] = useState(false)
+  const [vatTuModalQ, setVatTuModalQ]       = useState('')
+  const [vatTuModalSel, setVatTuModalSel]   = useState([])
+  const [vatTuResults, setVatTuResults]     = useState([])
+  const vatTuAllRef   = useRef([])
+  const vatTuModalRef = useRef(null)
 
   const upd = (key, val) => setF(prev => ({ ...prev, [key]: val }))
 
@@ -149,7 +164,7 @@ export default function BaoCao({ currentUser }) {
   }, [])
 
   useEffect(() => {
-    upd('phien', 'all')
+    upd('phien', [])
     supabase.from('phien_kiem_ke')
       .select('id,ma_kho,ke_toan_id,thu_kho_id,ngay_kiem')
       .gte('ngay_kiem', f.tuNgay).lte('ngay_kiem', f.denNgay)
@@ -166,14 +181,21 @@ export default function BaoCao({ currentUser }) {
         .select('id,phien_id,ma_vt,ten_vt,ma_kho,dm_kho(ten_kho),ma_dvt_kiem,he_so_quy_doi,so_luong_thuc_te,so_luong_quy_doi,so_luong_so_sach,chenh_lech,ghi_chu,created_at,nguoi_nhap_id,phien_kiem_ke!inner(id,ma_kho,ngay_kiem,ke_toan_id,thu_kho_id,xac_nhan_ke_toan,xac_nhan_thu_kho,dm_kho(ten_kho))')
         .order('created_at', { ascending: false })
 
-      if (f.phien !== 'all') {
-        q = q.eq('phien_kiem_ke.id', f.phien)
+      // Xây phien_id filter: kết hợp phiên chọn trực tiếp + filter kế toán/thủ kho
+      if (f.keToan.length > 0 || f.thuKho.length > 0) {
+        let match = phienList
+        if (f.keToan.length > 0) match = match.filter(p => f.keToan.includes(p.ke_toan_id))
+        if (f.thuKho.length > 0) match = match.filter(p => f.thuKho.includes(p.thu_kho_id))
+        const matchIds = match.map(p => p.id)
+        const finalIds = f.phien.length > 0 ? matchIds.filter(id => f.phien.includes(id)) : matchIds
+        if (finalIds.length === 0) { setData([]); setLoading(false); return }
+        q = q.in('phien_id', finalIds)
+      } else if (f.phien.length > 0) {
+        q = q.in('phien_id', f.phien)
       } else {
         q = q.gte('phien_kiem_ke.ngay_kiem', f.tuNgay).lte('phien_kiem_ke.ngay_kiem', f.denNgay)
-        if (f.kho !== 'all')    q = q.eq('ma_kho', f.kho)
-        if (f.keToan !== 'all') q = q.eq('phien_kiem_ke.ke_toan_id', f.keToan)
-        if (f.thuKho !== 'all') q = q.eq('phien_kiem_ke.thu_kho_id', f.thuKho)
       }
+      if (f.kho.length > 0) q = q.in('ma_kho', f.kho)
 
       if (tab === 'thua_thieu') q = q.not('chenh_lech', 'is', null).neq('chenh_lech', 0)
 
@@ -187,7 +209,7 @@ export default function BaoCao({ currentUser }) {
     } finally {
       setLoading(false)
     }
-  }, [tab, f.tuNgay, f.denNgay, f.kho, f.phien, f.keToan, f.thuKho, userMap])
+  }, [tab, f.tuNgay, f.denNgay, f.kho, f.phien, f.keToan, f.thuKho, userMap, phienList])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -195,7 +217,7 @@ export default function BaoCao({ currentUser }) {
     setLoadingTonKho(true)
     try {
       let q = supabase.from('ton_kho').select('ma_vt,ma_kho,so_luong_so_sach').order('ma_kho').order('ma_vt')
-      if (f.kho !== 'all') q = q.eq('ma_kho', f.kho)
+      if (f.kho.length > 0) q = q.in('ma_kho', f.kho)
       const { data: rows } = await q
       setTonKhoRows(rows || [])
     } finally {
@@ -208,7 +230,17 @@ export default function BaoCao({ currentUser }) {
   const loadNSS = useCallback(async () => {
     setLoadingNSS(true)
     try {
-      let rows = await db.chitiet.where('ngoai_so_sach').equals(1).toArray()
+      let rows = await db.chitiet.filter(r => {
+        if (!r.ngoai_so_sach) return false
+        if (f.phien.length > 0 && !f.phien.includes(r.phien_id)) return false
+        if (f.kho.length > 0 && !f.kho.includes(r.ma_kho)) return false
+        if (f.vatTu.length > 0 && !f.vatTu.includes(r.ma_vt)) return false
+        if (r.created_at) {
+          const d = r.created_at.slice(0, 10)
+          if (d < f.tuNgay || d > f.denNgay) return false
+        }
+        return true
+      }).toArray()
       if (currentUser.role !== 'admin') {
         const myPhien = await db.phien.filter(p =>
           p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id
@@ -226,9 +258,27 @@ export default function BaoCao({ currentUser }) {
     } finally {
       setLoadingNSS(false)
     }
-  }, [currentUser])
+  }, [currentUser, f])
 
   useEffect(() => { if (tab === 'ngoai_so_sach') loadNSS() }, [tab, loadNSS])
+
+  useEffect(() => {
+    if (!openVatTuModal) { vatTuAllRef.current = []; return }
+    db.dm_vat_tu.orderBy('ten_vt').toArray().then(rows => {
+      vatTuAllRef.current = rows
+      setVatTuResults(rows)
+    })
+  }, [openVatTuModal])
+
+  useEffect(() => {
+    if (!openVatTuModal) return
+    const q = vatTuModalQ.trim().toLowerCase()
+    const all = vatTuAllRef.current
+    setVatTuResults(q
+      ? all.filter(v => (v.ten_vt || '').toLowerCase().includes(q) || (v.ma_vt || '').toLowerCase().includes(q))
+      : all
+    )
+  }, [vatTuModalQ, openVatTuModal])
 
   async function doReconcile(item, vtDung) {
     const soSachMoi = item._phien?.ma_kho
@@ -240,9 +290,13 @@ export default function BaoCao({ currentUser }) {
       so_luong_so_sach: soSachMoi ?? 0,
       ngoai_so_sach: false
     })
+    await db.dm_vat_tu.delete(item.ma_vt)
+    await db.goi_y_vat_tu.delete(item.ma_vt)
     if (navigator.onLine) pushOfflineQueue()
     setReconcileItem(null)
     loadNSS()
+    setToastMsg(`Đã cập nhật mã vật tư: ${vtDung.ma_vt} · ${vtDung.ten_vt}`)
+    setTimeout(() => setToastMsg(null), 3000)
   }
 
   const khoMap = Object.fromEntries(khoList.map(k => [k.ma_kho, k.ten_kho]))
@@ -257,14 +311,12 @@ export default function BaoCao({ currentUser }) {
       : role === 'thu_kho'
   })
 
-  const kw = f.vatTu.trim().toLowerCase()
-  const displayData = kw
-    ? afterRole.filter(r => r.ma_vt?.toLowerCase().includes(kw) || r.ten_vt?.toLowerCase().includes(kw))
+  const displayData = f.vatTu.length > 0
+    ? afterRole.filter(r => f.vatTu.includes(r.ma_vt))
     : afterRole
 
-  const kwTonKho = f.vatTu.trim().toLowerCase()
-  const displayTonKho = kwTonKho
-    ? tonKhoRows.filter(r => r.ma_vt.toLowerCase().includes(kwTonKho) || (vtNameMap[r.ma_vt] || '').toLowerCase().includes(kwTonKho))
+  const displayTonKho = f.vatTu.length > 0
+    ? tonKhoRows.filter(r => f.vatTu.includes(r.ma_vt))
     : tonKhoRows
 
   // So sánh KT vs TK
@@ -482,21 +534,45 @@ export default function BaoCao({ currentUser }) {
   // ── List / report render ─────────────────────────────────────────
   const cols     = tab === 'kiem_ke' ? colKiemKe : colThuaThieu
   const filename = `${tab === 'kiem_ke' ? 'KiemKe' : tab === 'thua_thieu' ? 'ThuaThieu' : 'SoSanh'}_${f.tuNgay}_${f.denNgay}.csv`
-  const phienLocked  = f.phien !== 'all'
   const keToanList   = Object.values(userMap).filter(u => u.role === 'ke_toan')
   const thuKhoList   = Object.values(userMap).filter(u => u.role === 'thu_kho')
 
+  const fldLabel = (type) => {
+    const arr = f[type]
+    if (!arr.length) return type === 'phien' ? 'Tất cả phiên' : type === 'kho' ? 'Tất cả kho' : 'Tất cả'
+    const first = arr[0]
+    const rest = arr.length - 1
+    let firstName = ''
+    if (type === 'phien') {
+      const p = phienList.find(x => x.id === first)
+      firstName = p ? `${p.ngay_kiem} #${p.id.slice(-4).toUpperCase()}` : first
+    } else if (type === 'kho') {
+      firstName = khoMap[first] || first
+    } else {
+      firstName = userMap[first]?.ho_ten || first
+    }
+    return rest > 0 ? `${firstName} +${rest}` : firstName
+  }
+
+  const fldColor = (type) => f[type].length > 0 ? 'var(--text)' : 'var(--text-muted)'
+
+  const vatTuLabel = () => {
+    if (!f.vatTu.length) return 'Tất cả vật tư'
+    const first = vtNameMap[f.vatTu[0]] || f.vatTu[0]
+    return f.vatTu.length > 1 ? `${first} +${f.vatTu.length - 1}` : first
+  }
+
   const todayStr = getToday()
   const activeFilterCount = tab === 'ton_kho'
-    ? [f.kho !== 'all', f.vatTu.trim()].filter(Boolean).length
+    ? [f.kho.length > 0, f.vatTu.length > 0].filter(Boolean).length
     : [
         f.tuNgay !== todayStr || f.denNgay !== todayStr,
-        f.kho !== 'all', f.phien !== 'all', f.keToan !== 'all', f.thuKho !== 'all', f.vatTu.trim()
+        f.kho.length > 0, f.phien.length > 0, f.keToan.length > 0, f.thuKho.length > 0, f.vatTu.length > 0
       ].filter(Boolean).length
 
   const fmtDate   = d => d ? d.slice(8) + '/' + d.slice(5, 7) : ''
   const dateLabel = f.tuNgay === f.denNgay ? fmtDate(f.tuNgay) : `${fmtDate(f.tuNgay)}–${fmtDate(f.denNgay)}`
-  const rowCount  = tab === 'so_sanh' ? soSanhRows.length : tab === 'ton_kho' ? displayTonKho.length : displayData.length
+  const rowCount  = tab === 'so_sanh' ? soSanhRows.length : tab === 'ton_kho' ? displayTonKho.length : tab === 'ngoai_so_sach' ? nssItems.length : displayData.length
 
   return (
     <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -508,9 +584,15 @@ export default function BaoCao({ currentUser }) {
       <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}>
         <span style={{ flex: 1, fontSize: 13, color: 'var(--text-muted)' }}>
           {tab === 'ton_kho'
-            ? (f.kho !== 'all' ? `Kho: ${khoMap[f.kho] || f.kho}` : 'Tất cả kho')
+            ? (f.kho.length > 0 ? `Kho: ${fldLabel('kho')}` : 'Tất cả kho')
             : activeFilterCount > 0 ? `Ngày: ${dateLabel}` : `Hôm nay: ${dateLabel}`}
         </span>
+        {activeFilterCount > 0 && (
+          <button onClick={() => setF(INIT_FILTERS)} style={{
+            border: 'none', background: 'none', color: 'var(--green)',
+            fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap'
+          }}>Xóa lọc</button>
+        )}
         <button onClick={() => setShowFilters(v => !v)} style={{
           padding: '0 16px', height: 38, borderRadius: 8, border: '1px solid var(--border)',
           background: activeFilterCount > 0 ? 'var(--green)' : '#fff',
@@ -538,95 +620,88 @@ export default function BaoCao({ currentUser }) {
             </div>
           )}
 
-          {tab !== 'so_sanh' && tab !== 'ton_kho' && (
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Loại dữ liệu</div>
-              <select className="input-select" value={f.loaiDuLieu}
-                onChange={e => upd('loaiDuLieu', e.target.value)} style={{ width: '100%' }}>
-                <option value="ke_toan">Số liệu kế toán</option>
-                <option value="thu_kho">Số liệu thủ kho</option>
-              </select>
-            </div>
-          )}
-
-          {tab !== 'ton_kho' && (
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Phiên kiểm kê</div>
-              <select className="input-select" value={f.phien} onChange={e => upd('phien', e.target.value)} style={{ width: '100%' }}>
-                <option value="all">Tất cả phiên</option>
-                {phienList.map(p => {
-                  const kt = userMap[p.ke_toan_id]?.ma_user || '?'
-                  const tk = userMap[p.thu_kho_id]?.ma_user || '?'
-                  const ma = p.id?.slice(-4).toUpperCase()
-                  return <option key={p.id} value={p.id}>{p.ngay_kiem}{p.ma_kho ? ` · ${p.ma_kho}` : ''} · {kt}/{tk} #{ma}</option>
-                })}
-              </select>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kho</div>
-              <select className="input-select" value={f.kho} onChange={e => upd('kho', e.target.value)}
-                disabled={tab !== 'ton_kho' && phienLocked}
-                style={{ width: '100%', opacity: (tab !== 'ton_kho' && phienLocked) ? 0.45 : 1 }}>
-                <option value="all">Tất cả kho</option>
-                {khoList.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
-              </select>
-            </div>
-            {tab !== 'ton_kho' && (
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kế toán</div>
-                <select className="input-select" value={f.keToan} onChange={e => upd('keToan', e.target.value)}
-                  disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
-                  <option value="all">Tất cả</option>
-                  {keToanList.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
-                </select>
+          {/* Hàng 2: Loại DL + Phiên + Kho (non-ton_kho) hoặc Kho + Vật tư (ton_kho) */}
+          {tab !== 'ton_kho' ? (
+            <div style={{ display: 'flex', gap: 8 }}>
+              {tab !== 'so_sanh' && tab !== 'ngoai_so_sach' && (
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Loại dữ liệu</div>
+                  <select className="input-select" value={f.loaiDuLieu}
+                    onChange={e => upd('loaiDuLieu', e.target.value)} style={{ width: '100%' }}>
+                    <option value="ke_toan">Số liệu kế toán</option>
+                    <option value="thu_kho">Số liệu thủ kho</option>
+                  </select>
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Phiên kiểm kê</div>
+                <div className="input-select" onClick={() => { setFilterModal('phien'); setFilterModalSel(f.phien); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('phien'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('phien')}
+                </div>
               </div>
-            )}
-          </div>
-
-          {tab !== 'ton_kho' && (
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kho</div>
+                <div className="input-select" onClick={() => { setFilterModal('kho'); setFilterModalSel(f.kho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('kho'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('kho')}
+                </div>
+              </div>
+            </div>
+          ) : (
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Thủ kho</div>
-                <select className="input-select" value={f.thuKho} onChange={e => upd('thuKho', e.target.value)}
-                  disabled={phienLocked} style={{ width: '100%', opacity: phienLocked ? 0.45 : 1 }}>
-                  <option value="all">Tất cả</option>
-                  {thuKhoList.map(u => <option key={u.id} value={u.id}>{u.ho_ten}</option>)}
-                </select>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kho</div>
+                <div className="input-select" onClick={() => { setFilterModal('kho'); setFilterModalSel(f.kho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('kho') }}>
+                  {fldLabel('kho')}
+                </div>
               </div>
-              <div style={{ flex: 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
-                <input className="input-field" value={f.vatTu}
-                  onChange={e => upd('vatTu', e.target.value)}
-                  placeholder="Mã hoặc tên VT" style={{ width: '100%' }} />
+                <div className="input-select" onClick={() => { setVatTuModalQ(''); setVatTuModalSel(f.vatTu); setOpenVatTuModal(true) }}
+                  style={{ cursor: 'pointer', color: f.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {vatTuLabel()}
+                </div>
               </div>
             </div>
           )}
 
-          {tab === 'ton_kho' && (
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
-              <input className="input-field" value={f.vatTu}
-                onChange={e => upd('vatTu', e.target.value)}
-                placeholder="Mã hoặc tên VT" style={{ width: '100%' }} />
+          {/* Hàng 3: Kế toán + Thủ kho + Vật tư */}
+          {tab !== 'ton_kho' && (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kế toán</div>
+                <div className="input-select" onClick={() => { setFilterModal('keToan'); setFilterModalSel(f.keToan); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('keToan'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('keToan')}
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Thủ kho</div>
+                <div className="input-select" onClick={() => { setFilterModal('thuKho'); setFilterModalSel(f.thuKho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('thuKho'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('thuKho')}
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
+                <div className="input-select" onClick={() => { setVatTuModalQ(''); setVatTuModalSel(f.vatTu); setOpenVatTuModal(true) }}
+                  style={{ cursor: 'pointer', color: f.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {vatTuLabel()}
+                </div>
+              </div>
             </div>
           )}
 
-          <button onClick={() => { setF(INIT_FILTERS); setShowFilters(false) }} style={{
-            alignSelf: 'flex-end', padding: '4px 14px', fontSize: 12,
-            border: '1px solid var(--border)', borderRadius: 6,
-            background: '#fff', color: 'var(--text-muted)', cursor: 'pointer'
-          }}>Xóa bộ lọc</button>
         </div>
       )}
 
-      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0, overflowX: 'auto' }}>
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
-            flex: 1, padding: '10px 4px', border: 'none', background: 'none',
-            fontSize: 12, fontWeight: 500,
+            flexShrink: 0, padding: '10px 12px', border: 'none', background: 'none',
+            fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
             color: tab === t.key ? 'var(--green)' : 'var(--text-muted)',
             borderBottom: tab === t.key ? '2px solid var(--green)' : '2px solid transparent',
             cursor: 'pointer'
@@ -639,13 +714,13 @@ export default function BaoCao({ currentUser }) {
           {tab === 'ton_kho' ? (
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn-secondary"
-                onClick={() => exportCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
+                onClick={() => exportCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}
                 disabled={!displayTonKho.length}
                 style={{ flex: 1, fontSize: 13 }}>
                 ⬇ Xuất CSV ({displayTonKho.length})
               </button>
               <button className="btn-secondary"
-                onClick={() => shareCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho !== 'all' ? f.kho : 'TatCaKho'}.csv`)}
+                onClick={() => shareCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}
                 disabled={!displayTonKho.length}
                 style={{ flex: 1, fontSize: 13 }}>
                 ⬆ Chia sẻ
@@ -674,52 +749,41 @@ export default function BaoCao({ currentUser }) {
         {tab === 'ngoai_so_sach' ? (
           <>
             {reconcileItem && (
-              <div style={{
-                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
-                zIndex: 100, display: 'flex', alignItems: 'flex-end'
-              }}>
-                <div style={{
-                  background: '#fff', width: '100%', maxWidth: 480, margin: '0 auto',
-                  borderRadius: '16px 16px 0 0', padding: 20
-                }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Chọn mã đúng</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-                    Tên tạm: <b>{reconcileItem.ten_vt}</b>
-                  </div>
-                  <ChonVatTu value={null} onSelect={vt => vt && doReconcile(reconcileItem, vt)} />
-                  <button className="btn-secondary" onClick={() => setReconcileItem(null)}
-                    style={{ width: '100%', marginTop: 12 }}>Hủy</button>
-                </div>
-              </div>
+              <ChonVatTu autoOpen value={null} onSelect={vt => {
+                if (vt) doReconcile(reconcileItem, vt)
+                else setReconcileItem(null)
+              }} />
             )}
             {loadingNSS ? (
               <div className="empty-state">Đang tải...</div>
             ) : nssItems.length === 0 ? (
               <div className="empty-state">Không có mặt hàng ngoài sổ sách</div>
-            ) : nssItems.map((item, i) => {
-              const kho = item._phien?.ma_kho || item.ma_kho || ''
+            ) : nssItems.map(item => {
+              const maKho = item.ma_kho || item._phien?.ma_kho || ''
+              const tenKho = khoList.find(k => k.ma_kho === maKho)?.ten_kho || maKho
+              const gio = item.created_at ? new Date(item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''
               return (
-                <div key={item.id} style={{
-                  padding: '12px 16px', borderBottom: '1px solid var(--border)',
-                  background: i % 2 === 0 ? '#fff' : '#FAFAFA'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{item.ten_vt}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                        Mã tạm: {item.ma_vt} · Kho: {kho} · {item.ma_dvt_kiem || ''}
-                      </div>
-                      <div style={{ fontSize: 12, marginTop: 4 }}>
-                        SL kiểm: <b>{item.so_luong_thuc_te}</b>
-                        <span style={{ marginLeft: 12, color: '#D97706' }}>Chênh lệch: +{item.so_luong_thuc_te}</span>
-                      </div>
+                <div key={item.id} className="item-row" style={{ cursor: 'default', padding: '10px 16px', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                    <div className="item-name" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span className="item-code">{item.ma_vt}</span> · {item.ten_vt}
                     </div>
-                    <button className="btn-secondary"
-                      onClick={() => setReconcileItem(item)}
-                      style={{ fontSize: 12, padding: '6px 10px', flexShrink: 0 }}>
-                      Chọn mã đúng
-                    </button>
+                    <div style={{ fontWeight: 600, fontSize: 13, flexShrink: 0 }}>
+                      {item.so_luong_thuc_te} {item.ma_dvt_kiem || ''}
+                    </div>
                   </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 }}>
+                    <div className="item-meta">{item.ma_dvt_kiem || ''}</div>
+                    <span className="lot-tag" style={{ background: '#FEF3C7', color: '#D97706' }}>Ngoài SS</span>
+                  </div>
+                  <div className="item-meta" style={{ marginTop: 2 }}>
+                    {tenKho ? `${tenKho} · ` : ''}{gio}
+                  </div>
+                  <button className="btn-primary"
+                    onClick={() => setReconcileItem(item)}
+                    style={{ fontSize: 13, width: '100%', marginTop: 8 }}>
+                    Chọn mã đúng
+                  </button>
                 </div>
               )
             })}
@@ -864,6 +928,118 @@ export default function BaoCao({ currentUser }) {
           </table>
         )}
       </div>
+
+      {openVatTuModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <span style={{ fontWeight: 600, fontSize: 15 }}>Vật tư</span>
+              <div style={{ display: 'flex', gap: 16 }}>
+                <button onClick={() => setVatTuModalSel([])}
+                  style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
+                <button onClick={() => { upd('vatTu', vatTuModalSel); setOpenVatTuModal(false) }}
+                  style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+              </div>
+            </div>
+            <input ref={vatTuModalRef} type="text" className="input-field"
+              placeholder="Tìm mã hoặc tên vật tư"
+              value={vatTuModalQ} onChange={e => setVatTuModalQ(e.target.value)}
+              style={{ margin: 0 }} autoFocus />
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {vatTuResults.length === 0 && vatTuModalQ.trim() ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Không tìm thấy vật tư</div>
+            ) : vatTuResults.map(v => {
+              const checked = vatTuModalSel.includes(v.ma_vt)
+              return (
+                <div key={v.ma_vt} onClick={() => setVatTuModalSel(prev => checked ? prev.filter(x => x !== v.ma_vt) : [...prev, v.ma_vt])}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--green)' : '#CBD5E1'}`,
+                    background: checked ? 'var(--green)' : '#fff', flexShrink: 0,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    {checked && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                  </div>
+                  <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{v.ma_vt}</span>
+                  <span style={{ fontSize: 14 }}>{v.ten_vt}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {filterModal && (() => {
+        const TITLES = { phien: 'Phiên kiểm kê', kho: 'Kho', keToan: 'Kế toán', thuKho: 'Thủ kho' }
+        let items = []
+        if (filterModal === 'phien') {
+          items = phienList.map(p => {
+            const kt = userMap[p.ke_toan_id]?.ma_user || '?'
+            const tk = userMap[p.thu_kho_id]?.ma_user || '?'
+            return { id: p.id, code: p.id.slice(-4).toUpperCase(), label: `${p.ngay_kiem}${p.ma_kho ? ` · ${khoMap[p.ma_kho] || p.ma_kho}` : ''} · ${kt}/${tk}` }
+          })
+        } else if (filterModal === 'kho') {
+          items = khoList.map(k => ({ id: k.ma_kho, code: k.ma_kho, label: k.ten_kho }))
+        } else if (filterModal === 'keToan') {
+          items = keToanList.map(u => ({ id: u.id, label: u.ho_ten }))
+        } else if (filterModal === 'thuKho') {
+          items = thuKhoList.map(u => ({ id: u.id, label: u.ho_ten }))
+        }
+        const q = filterModalQ.toLowerCase()
+        const filtered = q ? items.filter(i => i.label.toLowerCase().includes(q) || (i.code || '').toLowerCase().includes(q)) : items
+        const toggle = (id) => setFilterModalSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+        return (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            {/* Header */}
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>{TITLES[filterModal]}</span>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <button onClick={() => setFilterModalSel([])} style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
+                  <button onClick={() => { upd(filterModal, filterModalSel); setFilterModal(null); setFilterModalQ('') }} style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+                </div>
+              </div>
+              <input ref={filterModalRef} type="text" className="input-field"
+                placeholder="Search"
+                value={filterModalQ} onChange={e => setFilterModalQ(e.target.value)}
+                style={{ margin: 0 }} />
+            </div>
+            {/* List */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {filtered.map(item => {
+                const checked = filterModalSel.includes(item.id)
+                return (
+                  <div key={item.id} onClick={() => toggle(item.id)}
+                    style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <div style={{
+                      width: 20, height: 20, borderRadius: 4, border: `2px solid ${checked ? 'var(--green)' : '#CBD5E1'}`,
+                      background: checked ? 'var(--green)' : '#fff', flexShrink: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>
+                      {checked && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
+                    </div>
+                    {item.code && <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{item.code}</span>}
+                    <span style={{ fontSize: 14 }}>{item.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+      {toastMsg && (
+        <div style={{
+          position: 'fixed', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+          background: '#1D9E75', color: '#fff', padding: '12px 20px',
+          borderRadius: 10, fontSize: 14, fontWeight: 500,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)', zIndex: 999,
+          maxWidth: 'calc(100% - 32px)', textAlign: 'center'
+        }}>
+          ✓ {toastMsg}
+        </div>
+      )}
     </div>
   )
 }
