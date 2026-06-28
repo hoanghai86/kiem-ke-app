@@ -337,7 +337,7 @@ export default function KiemKe({ currentUser }) {
           <div className="item-name" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <span className="item-code">{item.ma_vt}</span>
             <span style={{ color: 'var(--text-muted)', margin: '0 3px' }}>·</span>
-            <span style={{ fontWeight: 600, color: '#1a56db' }}>{item.ten_vt}</span>
+            <span style={{ fontWeight: 700, color: 'var(--text)' }}>{item.ten_vt}</span>
           </div>
           <div style={{ flexShrink: 0, fontWeight: 700, fontSize: 15, color: '#DB2777' }}>
             {fmtSL(soQD)} <span style={{ fontSize: 11, fontWeight: 700 }}>{tenDvtChinh}</span>

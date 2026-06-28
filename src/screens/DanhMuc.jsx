@@ -5,14 +5,18 @@ import { supabase } from '../lib/supabase'
 import { pullDanhMuc } from '../lib/sync'
 
 const TABS = [
-  { key: 'kho',    label: 'Kho' },
-  { key: 'dvt',    label: 'Đơn vị tính' },
-  { key: 'vat_tu', label: 'Vật tư' },
+  { key: 'kho',     label: 'Kho' },
+  { key: 'dvt',     label: 'Đơn vị tính' },
+  { key: 'vat_tu',  label: 'Vật tư' },
+  { key: 'ton_kho', label: 'Tồn kho' },
 ]
 
-const EMPTY = { kho: { ma_kho: '', ten_kho: '', active: true },
-                dvt: { ma_dvt: '', ten_dvt: '', active: true },
-                vat_tu: { ma_vt: '', ten_vt: '', ma_dvt_chinh: '', active: true } }
+const PAGE_SIZE = 50
+
+const EMPTY = { kho:     { ma_kho: '', ten_kho: '', active: true },
+                dvt:     { ma_dvt: '', ten_dvt: '', active: true },
+                vat_tu:  { ma_vt: '', ten_vt: '', ma_dvt_chinh: '', active: true },
+                ton_kho: { ma_vt: '', ten_vt: '', ma_kho: '', ma_dvt: '', so_luong_so_sach: '' } }
 
 export default function DanhMuc({ inline = false }) {
   const navigate = useNavigate()
@@ -22,6 +26,7 @@ export default function DanhMuc({ inline = false }) {
   const [search, setSearch]     = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState(null)
+  const [maEditable, setMaEditable] = useState(false)
   const [form, setForm]         = useState(EMPTY.kho)
   const [saving, setSaving]     = useState(false)
   const [err, setErr]           = useState('')
@@ -34,6 +39,13 @@ export default function DanhMuc({ inline = false }) {
   const [checkedIds, setCheckedIds]                       = useState(new Set())
   const [confirmDeleteChecked, setConfirmDeleteChecked]   = useState(false)
   const [infoMsg, setInfoMsg]                             = useState('')
+  const [page, setPage]                                   = useState(1)
+  const [vatTuOptions, setVatTuOptions]                   = useState([])
+  const [khoList, setKhoList]                             = useState([])
+  const [openVtModal, setOpenVtModal]                     = useState(false)
+  const [vtModalQ, setVtModalQ]                           = useState('')
+  const [openKhoModal, setOpenKhoModal]                   = useState(false)
+  const [khoModalQ, setKhoModalQ]                         = useState('')
   const importRef = useRef(null)
 
   const toActive = v => String(v ?? '1').trim() !== '0'
@@ -57,16 +69,31 @@ export default function DanhMuc({ inline = false }) {
       getRow: r => [r.ma_vt, r.ten_vt, r.ma_dvt_chinh || '', r.active ? '1' : '0'],
       toPayload: cols => ({ ma_vt: String(cols[0]||'').trim().toUpperCase(), ten_vt: String(cols[1]||'').trim(), ma_dvt_chinh: String(cols[2]||'').trim() || null, active: toActive(cols[3]) }),
     },
+    ton_kho: {
+      table: 'ton_kho', key: 'ma_vt,ma_kho',
+      headers: ['ma_vt', 'ten_vt', 'ma_kho', 'ma_dvt', 'so_luong_so_sach'],
+      getRow: r => [r.ma_vt, r.ten_vt || '', r.ma_kho, r.ma_dvt || '', r.so_luong_so_sach ?? 0],
+      toPayload: cols => ({
+        ma_vt: String(cols[0]||'').trim().toUpperCase(),
+        ten_vt: String(cols[1]||'').trim(),
+        ma_kho: String(cols[2]||'').trim().toUpperCase(),
+        ma_dvt: String(cols[3]||'').trim() || null,
+        so_luong_so_sach: parseFloat(String(cols[4]||'0').replace(',', '.')) || 0,
+      }),
+    },
   }
 
-  useEffect(() => { loadList(); setSearch(''); closeForm(); setSelectedId(null); setDeletingId(null); setConfirmDeleteAll(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false); setInfoMsg('') }, [tab])
-  useEffect(() => { if (tab === 'vat_tu') loadDvtOptions() }, [tab])
+  useEffect(() => { loadList(); setSearch(''); closeForm(); setSelectedId(null); setDeletingId(null); setConfirmDeleteAll(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false); setInfoMsg(''); setPage(1); setConfirmDeleteFiltered(false) }, [tab])
+  useEffect(() => { if (tab === 'vat_tu' || tab === 'ton_kho') loadDvtOptions() }, [tab])
+  useEffect(() => { if (tab === 'ton_kho') { loadVatTuOptions(); loadKhoList() } }, [tab])
 
   async function loadList() {
     setLoading(true)
-    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
-    const orderMap = { kho: 'ma_kho', dvt: 'ma_dvt', vat_tu: 'ma_vt' }
-    const { data } = await supabase.from(tableMap[tab]).select('*').order(orderMap[tab])
+    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu', ton_kho: 'ton_kho' }
+    const orderMap = { kho: 'ma_kho', dvt: 'ma_dvt', vat_tu: 'ma_vt', ton_kho: 'ma_kho' }
+    let q = supabase.from(tableMap[tab]).select('*').order(orderMap[tab])
+    if (tab === 'ton_kho') q = q.order('ma_vt')
+    const { data } = await q
     setList(data || [])
     setLoading(false)
   }
@@ -76,6 +103,16 @@ export default function DanhMuc({ inline = false }) {
     setDvtOptions(data || [])
   }
 
+  async function loadVatTuOptions() {
+    const { data } = await supabase.from('dm_vat_tu').select('ma_vt, ten_vt, ma_dvt_chinh').order('ma_vt')
+    setVatTuOptions(data || [])
+  }
+
+  async function loadKhoList() {
+    const { data } = await supabase.from('dm_kho').select('ma_kho, ten_kho').order('ma_kho')
+    setKhoList(data || [])
+  }
+
   function openCreate() {
     setEditItem(null)
     setForm(EMPTY[tab])
@@ -83,13 +120,17 @@ export default function DanhMuc({ inline = false }) {
     setShowForm(true)
   }
 
-  function openEdit(item) {
+  async function openEdit(item) {
     setEditItem(item)
-    if (tab === 'kho')    setForm({ ma_kho: item.ma_kho, ten_kho: item.ten_kho, active: item.active })
-    if (tab === 'dvt')    setForm({ ma_dvt: item.ma_dvt, ten_dvt: item.ten_dvt, active: item.active })
-    if (tab === 'vat_tu') setForm({ ma_vt: item.ma_vt, ten_vt: item.ten_vt, ma_dvt_chinh: item.ma_dvt_chinh || '', active: item.active })
+    if (tab === 'kho')     setForm({ ma_kho: item.ma_kho, ten_kho: item.ten_kho, active: item.active })
+    if (tab === 'dvt')     setForm({ ma_dvt: item.ma_dvt, ten_dvt: item.ten_dvt, active: item.active })
+    if (tab === 'vat_tu')  setForm({ ma_vt: item.ma_vt, ten_vt: item.ten_vt, ma_dvt_chinh: item.ma_dvt_chinh || '', active: item.active })
+    if (tab === 'ton_kho') setForm({ ma_vt: item.ma_vt, ten_vt: item.ten_vt || '', ma_kho: item.ma_kho, ma_dvt: item.ma_dvt || '', so_luong_so_sach: item.so_luong_so_sach ?? '' })
     setErr('')
+    setMaEditable(false)
     setShowForm(true)
+    const inUse = await checkInUse(tab, [item])
+    setMaEditable(inUse.size === 0)
   }
 
   function closeForm() {
@@ -109,19 +150,42 @@ export default function DanhMuc({ inline = false }) {
       if (!form.ma_kho.trim() || !form.ten_kho.trim()) { setErr('Mã kho và tên kho là bắt buộc'); return }
       table = 'dm_kho'
       payload = editItem
-        ? { ten_kho: form.ten_kho.trim(), active: form.active }
+        ? { ...(maEditable && { ma_kho: form.ma_kho.trim().toUpperCase() }), ten_kho: form.ten_kho.trim(), active: form.active }
         : { ma_kho: form.ma_kho.trim().toUpperCase(), ten_kho: form.ten_kho.trim(), active: form.active }
     } else if (tab === 'dvt') {
       if (!form.ma_dvt.trim() || !form.ten_dvt.trim()) { setErr('Mã DVT và tên DVT là bắt buộc'); return }
       table = 'dm_dvt'
       payload = editItem
-        ? { ten_dvt: form.ten_dvt.trim(), active: form.active }
+        ? { ...(maEditable && { ma_dvt: form.ma_dvt.trim().toUpperCase() }), ten_dvt: form.ten_dvt.trim(), active: form.active }
         : { ma_dvt: form.ma_dvt.trim().toUpperCase(), ten_dvt: form.ten_dvt.trim(), active: form.active }
+    } else if (tab === 'ton_kho') {
+      const maVtNew  = form.ma_vt.trim().toUpperCase()
+      const maKhoNew = form.ma_kho.trim().toUpperCase()
+      if (!maVtNew)  { setErr('Mã vật tư là bắt buộc'); return }
+      if (!maKhoNew) { setErr('Mã kho là bắt buộc'); return }
+      const vtFound = vatTuOptions.find(v => v.ma_vt === maVtNew)
+      if (!vtFound) { setErr(`Mã vật tư "${maVtNew}" không tồn tại trong danh mục`); return }
+      {
+        const dupQ = supabase.from('ton_kho').select('id').eq('ma_vt', maVtNew).eq('ma_kho', maKhoNew)
+        const { data: dup } = await (editItem ? dupQ.neq('id', editItem.id) : dupQ).maybeSingle()
+        if (dup) {
+          setErr(`${maVtNew} đã có tồn kho tại kho ${maKhoNew} — không thể trùng`)
+          return
+        }
+      }
+      table = 'ton_kho'
+      payload = {
+        ma_vt: maVtNew,
+        ten_vt: vtFound.ten_vt,
+        ma_kho: maKhoNew,
+        ma_dvt: form.ma_dvt || null,
+        so_luong_so_sach: parseFloat(String(form.so_luong_so_sach).replace(',', '.')) || 0,
+      }
     } else {
       if (!form.ma_vt.trim() || !form.ten_vt.trim()) { setErr('Mã vật tư và tên là bắt buộc'); return }
       table = 'dm_vat_tu'
       payload = editItem
-        ? { ten_vt: form.ten_vt.trim(), ma_dvt_chinh: form.ma_dvt_chinh || null, active: form.active }
+        ? { ...(maEditable && { ma_vt: form.ma_vt.trim().toUpperCase() }), ten_vt: form.ten_vt.trim(), ma_dvt_chinh: form.ma_dvt_chinh || null, active: form.active }
         : { ma_vt: form.ma_vt.trim().toUpperCase(), ten_vt: form.ten_vt.trim(), ma_dvt_chinh: form.ma_dvt_chinh || null, active: form.active }
     }
 
@@ -144,6 +208,7 @@ export default function DanhMuc({ inline = false }) {
 
   async function checkInUse(currentTab, items) {
     if (!items.length) return new Set()
+    if (currentTab === 'ton_kho') return new Set()
     if (currentTab === 'vat_tu') {
       const keys = items.map(r => r.ma_vt)
       const [r1, r2] = await Promise.all([
@@ -167,15 +232,13 @@ export default function DanhMuc({ inline = false }) {
     }
     if (currentTab === 'kho') {
       const keys = items.map(r => r.ma_kho)
-      const [r1, r2, r3] = await Promise.all([
-        supabase.from('phien_kiem_ke').select('ma_kho').in('ma_kho', keys),
+      const [r1, r2] = await Promise.all([
         supabase.from('kiem_ke_chitiet').select('ma_kho').in('ma_kho', keys),
         supabase.from('ton_kho').select('ma_kho').in('ma_kho', keys),
       ])
       const used = new Set([
         ...(r1.data||[]).map(r=>r.ma_kho).filter(Boolean),
         ...(r2.data||[]).map(r=>r.ma_kho).filter(Boolean),
-        ...(r3.data||[]).map(r=>r.ma_kho).filter(Boolean),
       ])
       return new Set(items.filter(r => used.has(r.ma_kho)).map(r => r.id))
     }
@@ -183,10 +246,14 @@ export default function DanhMuc({ inline = false }) {
   }
 
   async function bulkDelete(items) {
-    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
+    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu', ton_kho: 'ton_kho' }
     const inUseIds = await checkInUse(tab, items)
     const safe = items.filter(r => !inUseIds.has(r.id))
     if (safe.length > 0) {
+      if (tab === 'kho') {
+        const keys = safe.map(r => r.ma_kho)
+        await supabase.from('phien_kiem_ke').delete().in('ma_kho', keys)
+      }
       const { error } = await supabase.from(tableMap[tab]).delete().in('id', safe.map(r => r.id))
       if (error) throw new Error(error.message)
       await loadList()
@@ -196,16 +263,22 @@ export default function DanhMuc({ inline = false }) {
   }
 
   async function handleDelete(id) {
-    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
+    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu', ton_kho: 'ton_kho' }
     const item = list.find(r => r.id === id)
     if (!item) return
     setSaving(true)
     try {
       const inUseIds = await checkInUse(tab, [item])
       if (inUseIds.has(id)) {
-        setErr('Không thể xóa: mục này đã có dữ liệu kiểm kê. Dùng "Tạm ẩn" thay thế.')
+        const reason = tab === 'dvt'
+          ? 'đang được dùng trong danh mục vật tư'
+          : 'vẫn còn dữ liệu kiểm kê hoặc tồn kho'
+        setErr(`Không thể xóa: mục này ${reason}. Dùng "Tạm ẩn" thay thế.`)
         setDeletingId(null)
         return
+      }
+      if (tab === 'kho') {
+        await supabase.from('phien_kiem_ke').delete().eq('ma_kho', item.ma_kho)
       }
       const { error } = await supabase.from(tableMap[tab]).delete().eq('id', id)
       if (error) throw new Error(error.message)
@@ -220,7 +293,7 @@ export default function DanhMuc({ inline = false }) {
   }
 
   async function handleToggleActive(item) {
-    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu' }
+    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu', ton_kho: 'ton_kho' }
     await supabase.from(tableMap[tab]).update({ active: !item.active }).eq('id', item.id)
     setList(prev => prev.map(r => r.id === item.id ? { ...r, active: !item.active } : r))
   }
@@ -249,7 +322,7 @@ export default function DanhMuc({ inline = false }) {
       const { deleted, kept } = await bulkDelete(items)
       setConfirmDeleteFiltered(false)
       if (kept === 0) setSearch('')
-      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục đã có dữ liệu kiểm kê.`)
+      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục ${tab === 'dvt' ? 'đang được dùng trong danh mục vật tư' : 'vẫn còn dữ liệu kiểm kê hoặc tồn kho'}.`)
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -264,7 +337,7 @@ export default function DanhMuc({ inline = false }) {
       const { deleted, kept } = await bulkDelete(items)
       setCheckedIds(new Set())
       setConfirmDeleteChecked(false)
-      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục đã có dữ liệu kiểm kê.`)
+      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục ${tab === 'dvt' ? 'đang được dùng trong danh mục vật tư' : 'vẫn còn dữ liệu kiểm kê hoặc tồn kho'}.`)
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -277,7 +350,7 @@ export default function DanhMuc({ inline = false }) {
     try {
       const { deleted, kept } = await bulkDelete(list)
       setConfirmDeleteAll(false)
-      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục đã có dữ liệu kiểm kê.`)
+      if (kept > 0) setInfoMsg(`Đã xóa ${deleted} mục. Giữ lại ${kept} mục ${tab === 'dvt' ? 'đang được dùng trong danh mục vật tư' : 'vẫn còn dữ liệu kiểm kê hoặc tồn kho'}.`)
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -303,8 +376,59 @@ export default function DanhMuc({ inline = false }) {
         }
         res.push(cur); return res
       }
-      const payloads = lines.slice(1).map(parseCSV).filter(c => c[0]?.trim()).map(c => cfg.toPayload(c))
+      const stripTrailing = cols => {
+        let end = cols.length
+        while (end > 0 && cols[end - 1].trim() === '') end--
+        return cols.slice(0, end)
+      }
+
+      // Với vật tư: fetch DVT hợp lệ trước để dùng khi align cột
+      let validDvtSet = null
+      if (tab === 'vat_tu') {
+        const { data: dvtRows } = await supabase.from('dm_dvt').select('ma_dvt')
+        validDvtSet = new Set((dvtRows || []).map(d => d.ma_dvt))
+      }
+
+      const headerCols = parseCSV(lines[0]).length
+      // Căn lại cột khi tên có dấu phẩy:
+      // - Vật tư: quét từ phải sang trái, tìm cột có giá trị DVT hợp lệ → mọi thứ trước là tên
+      // - Tab khác: dựa vào số cột header để rejoin
+      const alignCols = cols => {
+        if (validDvtSet) {
+          for (let pos = cols.length - 1; pos >= 2; pos--) {
+            if (validDvtSet.has(cols[pos].trim())) {
+              return [cols[0], cols.slice(1, pos).join(','), ...cols.slice(pos)]
+            }
+          }
+          return [cols[0], cols.slice(1).join(',')]
+        }
+        if (cols.length <= headerCols) return cols
+        const trailing = headerCols - 2
+        if (trailing < 1) return cols
+        return [cols[0], cols.slice(1, cols.length - trailing).join(','), ...cols.slice(cols.length - trailing)]
+      }
+
+      const payloads = lines.slice(1).map(parseCSV).map(stripTrailing).map(alignCols).filter(c => c[0]?.trim()).map(c => cfg.toPayload(c))
       if (!payloads.length) { setErr('Không có dòng hợp lệ'); return }
+      const keyFields = cfg.key.split(',')
+      const seen = new Map(); const dups = []
+      for (let i = 0; i < payloads.length; i++) {
+        const k = keyFields.map(f => payloads[i][f]).join(' + ')
+        const label = `"${k}" — tên: "${payloads[i].ten_vt || payloads[i].ten_kho || payloads[i].ten_dvt || ''}" (dòng ${seen.get(k) + 2} và ${i + 2})`
+        if (seen.has(k)) { dups.push(label) }
+        else { seen.set(k, i) }
+      }
+      if (dups.length) { setErr(`File có mã trùng:\n${dups.join('\n')}`); return }
+
+      // Với vật tư: block nếu vẫn còn DVT không tồn tại sau khi align
+      if (validDvtSet) {
+        const invalidDvt = new Set(payloads.map(p => p.ma_dvt_chinh).filter(v => v && !validDvtSet.has(v)))
+        if (invalidDvt.size) {
+          setErr(`Không thể import — các đơn vị tính sau chưa có trong danh mục ĐVT, hãy import ĐVT trước:\n${[...invalidDvt].join(', ')}`)
+          return
+        }
+      }
+
       const { error } = await supabase.from(cfg.table).upsert(payloads, { onConflict: cfg.key })
       if (error) throw new Error(error.message)
       await loadList(); await pullDanhMuc()
@@ -316,16 +440,20 @@ export default function DanhMuc({ inline = false }) {
   const terms = search.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
   const filtered = list.filter(r => {
     if (!terms.length) return true
-    const text = tab === 'kho'    ? `${r.ma_kho} ${r.ten_kho}`
-               : tab === 'dvt'    ? `${r.ma_dvt} ${r.ten_dvt}`
+    const text = tab === 'kho'     ? `${r.ma_kho} ${r.ten_kho}`
+               : tab === 'dvt'     ? `${r.ma_dvt} ${r.ten_dvt}`
+               : tab === 'ton_kho' ? `${r.ma_vt} ${r.ten_vt} ${r.ma_kho}`
                : `${r.ma_vt} ${r.ten_vt}`
     const lower = text.toLowerCase()
     return terms.some(t => lower.includes(t))
   })
 
+  const totalPages    = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pagedFiltered = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   // ── Form sub-screen ──────────────────────────────────────────────
   if (showForm) {
-    const titleMap = { kho: 'kho', dvt: 'đơn vị tính', vat_tu: 'vật tư' }
+    const titleMap = { kho: 'kho', dvt: 'đơn vị tính', vat_tu: 'vật tư', ton_kho: 'tồn kho' }
     return (
       <div className={inline ? undefined : 'screen'}>
         {!inline && (
@@ -347,8 +475,8 @@ export default function DanhMuc({ inline = false }) {
               <label className="field-label">Mã kho *</label>
               <input className="input-field" value={form.ma_kho}
                 onChange={e => setF('ma_kho', e.target.value)}
-                placeholder="VD: KHO01" disabled={!!editItem} />
-              {editItem && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Không thể đổi mã kho sau khi tạo</div>}
+                placeholder="VD: KHO01" disabled={editItem && !maEditable} />
+              {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã kho đang được dùng — không thể đổi</div>}
             </div>
             <div className="field-group">
               <label className="field-label">Tên kho *</label>
@@ -363,8 +491,8 @@ export default function DanhMuc({ inline = false }) {
               <label className="field-label">Mã ĐVT *</label>
               <input className="input-field" value={form.ma_dvt}
                 onChange={e => setF('ma_dvt', e.target.value)}
-                placeholder="VD: KG, CAI, HOP" disabled={!!editItem} />
-              {editItem && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Không thể đổi mã DVT sau khi tạo</div>}
+                placeholder="VD: KG, CAI, HOP" disabled={editItem && !maEditable} />
+              {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã DVT đang được dùng — không thể đổi</div>}
             </div>
             <div className="field-group">
               <label className="field-label">Tên đơn vị tính *</label>
@@ -379,8 +507,8 @@ export default function DanhMuc({ inline = false }) {
               <label className="field-label">Mã vật tư *</label>
               <input className="input-field" value={form.ma_vt}
                 onChange={e => setF('ma_vt', e.target.value)}
-                placeholder="VD: VT001" disabled={!!editItem} />
-              {editItem && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Không thể đổi mã vật tư sau khi tạo</div>}
+                placeholder="VD: VT001" disabled={editItem && !maEditable} />
+              {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã vật tư đang được dùng — không thể đổi</div>}
             </div>
             <div className="field-group">
               <label className="field-label">Tên vật tư *</label>
@@ -400,13 +528,52 @@ export default function DanhMuc({ inline = false }) {
             </div>
           </>}
 
-          <div className="field-group">
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-              <input type="checkbox" checked={form.active}
-                onChange={e => setF('active', e.target.checked)} />
-              <span className="field-label" style={{ margin: 0 }}>Đang hoạt động</span>
-            </label>
-          </div>
+          {tab === 'ton_kho' && <>
+            <div className="field-group">
+              <label className="field-label">Vật tư *</label>
+              <div className="input-select" onClick={() => { setVtModalQ(''); setOpenVtModal(true) }}
+                style={{ cursor: 'pointer', color: form.ma_vt ? 'var(--text)' : 'var(--text-muted)' }}>
+                {form.ma_vt ? `${form.ma_vt} – ${form.ten_vt}` : '-- Chọn vật tư --'}
+              </div>
+            </div>
+            <div className="field-group">
+              <label className="field-label">Kho *</label>
+              <div className="input-select" onClick={() => { setKhoModalQ(''); setOpenKhoModal(true) }}
+                style={{ cursor: 'pointer', color: form.ma_kho ? 'var(--text)' : 'var(--text-muted)' }}>
+                {form.ma_kho
+                  ? `${form.ma_kho} – ${khoList.find(k => k.ma_kho === form.ma_kho)?.ten_kho || ''}`
+                  : '-- Chọn kho --'}
+              </div>
+            </div>
+            <div className="row-2col">
+              <div className="field-group">
+                <label className="field-label">Đơn vị tính</label>
+                <select className="input-select" value={form.ma_dvt}
+                  onChange={e => setF('ma_dvt', e.target.value)}>
+                  <option value="">-- Chọn --</option>
+                  {dvtOptions.map(d => (
+                    <option key={d.ma_dvt} value={d.ma_dvt}>{d.ma_dvt}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="field-group">
+                <label className="field-label">SL sổ sách</label>
+                <input type="number" className="input-field" value={form.so_luong_so_sach}
+                  onChange={e => setF('so_luong_so_sach', e.target.value)}
+                  min="0" step="any" placeholder="0" />
+              </div>
+            </div>
+          </>}
+
+          {tab !== 'ton_kho' && (
+            <div className="field-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.active}
+                  onChange={e => setF('active', e.target.checked)} />
+                <span className="field-label" style={{ margin: 0 }}>Đang hoạt động</span>
+              </label>
+            </div>
+          )}
 
           <div className="row-2col" style={{ marginTop: 8 }}>
             <button className="btn-secondary" onClick={closeForm} disabled={saving}>Hủy</button>
@@ -415,12 +582,91 @@ export default function DanhMuc({ inline = false }) {
             </button>
           </div>
         </div>
+
+        {/* Modal chọn vật tư */}
+        {openVtModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Vật tư</span>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <button onClick={() => setVtModalQ('')}
+                    style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa</button>
+                  <button onClick={() => setOpenVtModal(false)}
+                    style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Hủy</button>
+                </div>
+              </div>
+              <input type="text" className="input-field" placeholder="Tìm mã hoặc tên vật tư..."
+                value={vtModalQ} onChange={e => setVtModalQ(e.target.value)}
+                autoFocus style={{ margin: 0 }} />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {vatTuOptions
+                .filter(v => !vtModalQ.trim() ||
+                  v.ma_vt.toLowerCase().includes(vtModalQ.toLowerCase()) ||
+                  (v.ten_vt || '').toLowerCase().includes(vtModalQ.toLowerCase()))
+                .map(v => (
+                  <div key={v.ma_vt}
+                    onClick={() => {
+                      setForm(f => ({ ...f, ma_vt: v.ma_vt, ten_vt: v.ten_vt, ma_dvt: v.ma_dvt_chinh || f.ma_dvt }))
+                      setOpenVtModal(false)
+                    }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', background: form.ma_vt === v.ma_vt ? '#F0FDF4' : '#fff' }}>
+                    <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{v.ma_vt}</span>
+                    <span style={{ fontSize: 14 }}>{v.ten_vt}</span>
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
+        {/* Modal chọn kho */}
+        {openKhoModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Kho</span>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <button onClick={() => setKhoModalQ('')}
+                    style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa</button>
+                  <button onClick={() => setOpenKhoModal(false)}
+                    style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Hủy</button>
+                </div>
+              </div>
+              <input type="text" className="input-field" placeholder="Tìm kho..."
+                value={khoModalQ} onChange={e => setKhoModalQ(e.target.value)}
+                autoFocus style={{ margin: 0 }} />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {khoList
+                .filter(k => !khoModalQ.trim() ||
+                  k.ma_kho.toLowerCase().includes(khoModalQ.toLowerCase()) ||
+                  k.ten_kho.toLowerCase().includes(khoModalQ.toLowerCase()))
+                .map(k => {
+                  const selected = form.ma_kho === k.ma_kho
+                  return (
+                    <div key={k.ma_kho}
+                      onClick={() => { setF('ma_kho', k.ma_kho); setOpenKhoModal(false) }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', background: selected ? '#F0FDF4' : '#fff' }}>
+                      <div style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${selected ? 'var(--green)' : '#D1D5DB'}`, background: selected ? 'var(--green)' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {selected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 14 }}>{k.ten_kho}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{k.ma_kho}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
 
   // ── Main screen ──────────────────────────────────────────────────
-  const countLabel = { kho: 'kho', dvt: 'đơn vị tính', vat_tu: 'vật tư' }
+  const countLabel = { kho: 'kho', dvt: 'đơn vị tính', vat_tu: 'vật tư', ton_kho: 'tồn kho' }
 
   return (
     <div className={inline ? undefined : 'screen'}>
@@ -488,7 +734,7 @@ export default function DanhMuc({ inline = false }) {
         )}
 
         <input className="input-field" placeholder="Tìm kiếm... (nhiều mã cách nhau bằng dấu phẩy)" value={search}
-          onChange={e => { setSearch(e.target.value); setConfirmDeleteFiltered(false) }} style={{ marginBottom: terms.length && filtered.length ? 6 : 12 }} />
+          onChange={e => { setSearch(e.target.value); setConfirmDeleteFiltered(false); setPage(1) }} style={{ marginBottom: terms.length && filtered.length ? 6 : 12 }} />
 
         {terms.length > 0 && filtered.length > 0 && (
           confirmDeleteFiltered ? (
@@ -561,21 +807,23 @@ export default function DanhMuc({ inline = false }) {
                 <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>Mã</th>
                 <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Tên</th>
                 {tab === 'vat_tu' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>ĐVT</th>}
-                <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>
+                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>Mã kho</th>}
+                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>SL sổ sách</th>}
+                {tab !== 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(item => {
+              {pagedFiltered.map(item => {
                 const id      = item.id
                 const ma      = tab === 'kho' ? item.ma_kho : tab === 'dvt' ? item.ma_dvt : item.ma_vt
                 const name    = tab === 'kho' ? item.ten_kho : tab === 'dvt' ? item.ten_dvt : item.ten_vt
-                const colSpan = tab === 'vat_tu' ? 5 : 4
+                const colSpan = tab === 'vat_tu' || tab === 'ton_kho' ? 5 : 4
                 const isSel   = selectedId === id
                 const isChk   = checkedIds.has(id)
                 return (
                   <>
                     <tr key={id} onClick={() => { setSelectedId(isSel ? null : id); setDeletingId(null) }}
-                      style={{ cursor: 'pointer', opacity: item.active ? 1 : 0.55, background: isSel ? '#F0FDF4' : isChk ? '#FAFFF5' : 'white', borderBottom: '1px solid #F3F4F6' }}>
+                      style={{ cursor: 'pointer', opacity: tab === 'ton_kho' || item.active ? 1 : 0.55, background: isSel ? '#F0FDF4' : isChk ? '#FAFFF5' : 'white', borderBottom: '1px solid #F3F4F6' }}>
                       <td style={{ padding: '10px 6px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={isChk}
                           onChange={e => {
@@ -586,15 +834,19 @@ export default function DanhMuc({ inline = false }) {
                             })
                           }} />
                       </td>
-                      <td style={{ padding: '10px 10px', fontWeight: 700, color: 'var(--green)', whiteSpace: 'nowrap' }}>{ma}</td>
+                      <td style={{ padding: '10px 10px', fontWeight: 700, color: '#1d9e75', whiteSpace: 'nowrap' }}>{ma}</td>
                       <td style={{ padding: '10px 10px' }}>{name}</td>
                       {tab === 'vat_tu' && <td style={{ padding: '10px 10px', color: 'var(--text-muted)' }}>{item.ma_dvt_chinh || '—'}</td>}
-                      <td style={{ padding: '10px 10px', textAlign: 'center' }}>
-                        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
-                          background: item.active ? '#D1FAE5' : '#F3F4F6', color: item.active ? '#065F46' : '#6B7280' }}>
-                          {item.active ? 'HĐ' : 'Ẩn'}
-                        </span>
-                      </td>
+                      {tab === 'ton_kho' && <td style={{ padding: '10px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{item.ma_kho}</td>}
+                      {tab === 'ton_kho' && <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 600 }}>{item.so_luong_so_sach ?? 0}</td>}
+                      {tab !== 'ton_kho' && (
+                        <td style={{ padding: '10px 10px', textAlign: 'center' }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
+                            background: item.active ? '#D1FAE5' : '#F3F4F6', color: item.active ? '#065F46' : '#6B7280' }}>
+                            {item.active ? 'HĐ' : 'Ẩn'}
+                          </span>
+                        </td>
+                      )}
                     </tr>
                     {isSel && (
                       <tr key={`${id}_sel`} style={{ background: '#F0FDF4' }}>
@@ -612,15 +864,17 @@ export default function DanhMuc({ inline = false }) {
                               </button>
                             </div>
                           ) : (
-                            <div style={{ display: 'flex', gap: 16 }}>
+                            <div style={{ display: 'flex', gap: 16, justifyContent: 'flex-end' }}>
                               <button onClick={e => { e.stopPropagation(); openEdit(item) }}
                                 style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', padding: '4px 0' }}>
                                 Sửa
                               </button>
-                              <button onClick={e => { e.stopPropagation(); handleToggleActive(item) }}
-                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#D97706', cursor: 'pointer', padding: '4px 0' }}>
-                                {item.active ? 'Tạm ẩn' : 'Hiện'}
-                              </button>
+                              {tab !== 'ton_kho' && (
+                                <button onClick={e => { e.stopPropagation(); handleToggleActive(item) }}
+                                  style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#D97706', cursor: 'pointer', padding: '4px 0' }}>
+                                  {item.active ? 'Tạm ẩn' : 'Hiện'}
+                                </button>
+                              )}
                               <button onClick={e => { e.stopPropagation(); setDeletingId(id) }}
                                 style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#EF4444', cursor: 'pointer', padding: '4px 0' }}>
                                 Xóa
@@ -636,6 +890,23 @@ export default function DanhMuc({ inline = false }) {
             </tbody>
           </table>
         )}
+        {filtered.length > PAGE_SIZE && (() => {
+          const btn = (disabled) => ({
+            border: '1px solid var(--border)', borderRadius: 6,
+            padding: '5px 11px', fontSize: 14, background: '#fff',
+            color: disabled ? '#CBD5E1' : 'var(--text)',
+            cursor: disabled ? 'default' : 'pointer',
+          })
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '12px 0 80px' }}>
+              <button onClick={() => setPage(1)} disabled={page === 1} style={btn(page === 1)}>«</button>
+              <button onClick={() => setPage(p => p - 1)} disabled={page === 1} style={btn(page === 1)}>‹</button>
+              <span style={{ fontSize: 13, fontWeight: 500, minWidth: 90, textAlign: 'center' }}>Trang {page} / {totalPages}</span>
+              <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages} style={btn(page === totalPages)}>›</button>
+              <button onClick={() => setPage(totalPages)} disabled={page === totalPages} style={btn(page === totalPages)}>»</button>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

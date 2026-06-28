@@ -45,6 +45,8 @@ async function shareCSV(rows, cols, filename) {
   }
 }
 
+const PAGE_SIZE = 50
+
 const getToday = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -93,6 +95,7 @@ export default function BaoCao({ currentUser }) {
   // Edit kho fullscreen modal
   const [openEditKhoModal, setOpenEditKhoModal] = useState(false)
   const [editKhoQ, setEditKhoQ] = useState('')
+  const [page, setPage] = useState(1)
 
   // Vật tư filter fullscreen modal
   const [openVatTuModal, setOpenVatTuModal] = useState(false)
@@ -355,6 +358,7 @@ export default function BaoCao({ currentUser }) {
   }, [currentUser, f])
 
   useEffect(() => { if (tab === 'ngoai_so_sach') loadNSS() }, [tab, loadNSS])
+  useEffect(() => { setPage(1) }, [tab, f])
 
   useEffect(() => {
     if (!openVatTuModal) { vatTuAllRef.current = []; return }
@@ -411,6 +415,21 @@ export default function BaoCao({ currentUser }) {
   const displayData = f.vatTu.length > 0
     ? afterRole.filter(r => f.vatTu.includes(r.ma_vt))
     : afterRole
+
+  // Tab Thừa/Thiếu SS: group by ma_vt, SUM các trường số
+  const displayDataFinal = tab !== 'thua_thieu' ? displayData : (() => {
+    const map = new Map()
+    for (const r of displayData) {
+      if (!map.has(r.ma_vt)) {
+        map.set(r.ma_vt, { ma_vt: r.ma_vt, ten_vt: r.ten_vt, so_luong_quy_doi: 0, so_luong_so_sach: null, chenh_lech: 0 })
+      }
+      const g = map.get(r.ma_vt)
+      g.so_luong_quy_doi += r.so_luong_quy_doi ?? 0
+      if (r.so_luong_so_sach != null) g.so_luong_so_sach = (g.so_luong_so_sach ?? 0) + r.so_luong_so_sach
+      g.chenh_lech += r.chenh_lech ?? 0
+    }
+    return [...map.values()]
+  })()
 
   const displayTonKho = f.vatTu.length > 0
     ? tonKhoRows.filter(r => f.vatTu.includes(r.ma_vt))
@@ -727,7 +746,14 @@ export default function BaoCao({ currentUser }) {
 
   const fmtDate   = d => d ? d.slice(8) + '/' + d.slice(5, 7) : ''
   const dateLabel = f.tuNgay === f.denNgay ? fmtDate(f.tuNgay) : `${fmtDate(f.tuNgay)}–${fmtDate(f.denNgay)}`
-  const rowCount  = tab === 'so_sanh' ? soSanhRows.length : tab === 'ton_kho' ? displayTonKho.length : tab === 'ngoai_so_sach' ? nssItems.length : displayData.length
+  const rowCount  = tab === 'so_sanh' ? soSanhRows.length : tab === 'ton_kho' ? displayTonKho.length : tab === 'ngoai_so_sach' ? nssItems.length : displayDataFinal.length
+
+  const totalPages = Math.max(1, Math.ceil(rowCount / PAGE_SIZE))
+  const pageStart  = (page - 1) * PAGE_SIZE
+  const pageDisplayDataFinal = displayDataFinal.slice(pageStart, page * PAGE_SIZE)
+  const pageSoSanhRows       = soSanhRows.slice(pageStart, page * PAGE_SIZE)
+  const pageDisplayTonKho    = displayTonKho.slice(pageStart, page * PAGE_SIZE)
+  const pageNssItems         = nssItems.slice(pageStart, page * PAGE_SIZE)
 
   return (
     <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
@@ -764,8 +790,8 @@ export default function BaoCao({ currentUser }) {
             </>
           }
           return <>
-            <button style={linkStyle} disabled={!displayData.length} onClick={() => exportCSV(displayData, cols, filename)}>⬇ CSV</button>
-            <button style={linkStyle} disabled={!displayData.length} onClick={() => shareCSV(displayData, cols, filename)}>⬆ Chia sẻ</button>
+            <button style={linkStyle} disabled={!displayDataFinal.length} onClick={() => exportCSV(displayDataFinal, cols, filename)}>⬇ CSV</button>
+            <button style={linkStyle} disabled={!displayDataFinal.length} onClick={() => shareCSV(displayDataFinal, cols, filename)}>⬆ Chia sẻ</button>
           </>
         })()}
         <span style={{ flex: 1 }} />
@@ -892,7 +918,7 @@ export default function BaoCao({ currentUser }) {
       </div>
       <div style={{ height: 6, background: '#F3F4F6', flexShrink: 0 }} />
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: rowCount > PAGE_SIZE ? 112 : 0 }}>
         {tab === 'ngoai_so_sach' ? (
           <>
             {reconcileItem && (
@@ -905,7 +931,7 @@ export default function BaoCao({ currentUser }) {
               <div className="empty-state">Đang tải...</div>
             ) : nssItems.length === 0 ? (
               <div className="empty-state">Không có mặt hàng ngoài sổ sách</div>
-            ) : nssItems.map(item => {
+            ) : pageNssItems.map(item => {
               const maKho = item.ma_kho || item._phien?.ma_kho || ''
               const tenKho = khoList.find(k => k.ma_kho === maKho)?.ten_kho || maKho
               return (
@@ -947,10 +973,10 @@ export default function BaoCao({ currentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {displayTonKho.map((row, i) => (
-                  <tr key={`${row.ma_vt}_${row.ma_kho}`} style={{ background: i % 2 === 0 ? '#fff' : '#F9FAFB' }}>
+                {pageDisplayTonKho.map((row, i) => (
+                  <tr key={`${row.ma_vt}_${row.ma_kho}`} style={{ background: (pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB' }}>
                     {colTonKho.map(c => {
-                      const val = c.get(row, i)
+                      const val = c.get(row, pageStart + i)
                       return (
                         <td key={c.label} style={{
                           padding: '7px 12px', borderBottom: '1px solid #F3F4F6',
@@ -990,7 +1016,7 @@ export default function BaoCao({ currentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {soSanhRows.map((r, i) => {
+                {pageSoSanhRows.map((r, i) => {
                   const lech = (r.sl_kt ?? 0) - (r.sl_tk ?? 0)
                   const missing = r.sl_kt === null || r.sl_tk === null
                   return (
@@ -1016,7 +1042,7 @@ export default function BaoCao({ currentUser }) {
             </table>
           )
 
-        ) : displayData.length === 0 ? (
+        ) : displayDataFinal.length === 0 ? (
           <div className="empty-state">
             {data.length === 0
               ? 'Dùng bộ lọc để chọn ngày, kho, kế toán, thủ kho cần xem'
@@ -1035,17 +1061,17 @@ export default function BaoCao({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {displayData.map((row, i) => {
+              {pageDisplayDataFinal.map((row, i) => {
                 const cl     = parseFloat(row.chenh_lech)
                 const rowBg  = tab === 'thua_thieu'
                   ? (cl < 0 ? '#FEF2F2' : '#F0FDF4')
-                  : (i % 2 === 0 ? '#fff' : '#F9FAFB')
+                  : ((pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB')
                 const clickable = tab === 'kiem_ke'
                 return (
                   <tr key={i} style={{ background: rowBg, cursor: clickable ? 'pointer' : 'default' }}
                     onClick={() => clickable && openDetail(row)}>
                     {cols.map(c => {
-                      const val    = c.get(row, i)
+                      const val    = c.get(row, pageStart + i)
                       const isLech = c.label === 'Lệch KT-SS/TK-SS'
                       const num    = parseFloat(val)
                       return (
@@ -1066,6 +1092,33 @@ export default function BaoCao({ currentUser }) {
           </table>
         )}
       </div>
+
+      {rowCount > PAGE_SIZE && (() => {
+        const btnStyle = (disabled) => ({
+          border: '1px solid var(--border)', borderRadius: 6,
+          padding: '5px 11px', fontSize: 14, background: '#fff',
+          color: disabled ? '#CBD5E1' : 'var(--text)',
+          cursor: disabled ? 'default' : 'pointer',
+        })
+        return (
+          <div style={{
+            position: 'fixed', bottom: 56, zIndex: 51,
+            left: '50%', transform: 'translateX(-50%)',
+            width: '100%', maxWidth: 480,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            gap: 8, padding: '8px 16px',
+            borderTop: '1px solid var(--border)', background: '#fff',
+          }}>
+            <button onClick={() => setPage(1)} disabled={page === 1} style={btnStyle(page === 1)}>«</button>
+            <button onClick={() => setPage(p => p - 1)} disabled={page === 1} style={btnStyle(page === 1)}>‹</button>
+            <span style={{ fontSize: 13, fontWeight: 500, minWidth: 90, textAlign: 'center' }}>
+              Trang {page} / {totalPages}
+            </span>
+            <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages} style={btnStyle(page === totalPages)}>›</button>
+            <button onClick={() => setPage(totalPages)} disabled={page === totalPages} style={btnStyle(page === totalPages)}>»</button>
+          </div>
+        )
+      })()}
 
       {openVatTuModal && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>

@@ -396,7 +396,7 @@ export default function Admin() {
                                     </button>
                                   </div>
                                 ) : (
-                                  <div style={{ display: 'flex', gap: 16 }}>
+                                  <div style={{ display: 'flex', gap: 16, justifyContent: 'flex-end' }}>
                                     <button onClick={e => { e.stopPropagation(); openEdit(user) }}
                                       style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', padding: '4px 0' }}>
                                       Sửa

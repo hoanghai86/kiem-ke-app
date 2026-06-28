@@ -168,19 +168,19 @@ export function subscribeVatTuRealtime() {
   _danhMucChannel = supabase
     .channel('danh_muc_changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_vat_tu' }, async payload => {
-      if (payload.eventType === 'DELETE') await db.dm_vat_tu.delete(payload.old.ma_vt)
+      if (payload.eventType === 'DELETE') { if (payload.old?.ma_vt) await db.dm_vat_tu.delete(payload.old.ma_vt) }
       else await db.dm_vat_tu.put(payload.new)
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_kho' }, async payload => {
-      if (payload.eventType === 'DELETE') await db.dm_kho.delete(payload.old.ma_kho)
+      if (payload.eventType === 'DELETE') { if (payload.old?.ma_kho) await db.dm_kho.delete(payload.old.ma_kho) }
       else await db.dm_kho.put(payload.new)
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_dvt' }, async payload => {
-      if (payload.eventType === 'DELETE') await db.dm_dvt.delete(payload.old.ma_dvt)
+      if (payload.eventType === 'DELETE') { if (payload.old?.ma_dvt) await db.dm_dvt.delete(payload.old.ma_dvt) }
       else await db.dm_dvt.put(payload.new)
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_user' }, async payload => {
-      if (payload.eventType === 'DELETE') await db.dm_user.delete(payload.old.id)
+      if (payload.eventType === 'DELETE') { if (payload.old?.id) await db.dm_user.delete(payload.old.id) }
       else await db.dm_user.put(payload.new)
     })
     .subscribe()
