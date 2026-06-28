@@ -518,7 +518,7 @@ export default function BaoCao({ currentUser }) {
             {editMode ? 'Chỉnh sửa' : 'Chi tiết'} · {detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || ''}
           </div>
         </div>
-        <div className="content" style={{ paddingBottom: 180 }}>
+        <div className="content" style={{ paddingBottom: 120 }}>
           {isLocked && (
             <div style={{ background: '#FEF3C7', color: '#92400E', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 13 }}>
               🔒 Phiên đã có xác nhận — không thể sửa/xóa
@@ -612,9 +612,9 @@ export default function BaoCao({ currentUser }) {
 
         </div>
 
-        {/* Footer fixed — đè lên content, nằm trên BottomNav, trên bàn phím khi keyboard mở */}
+        {/* Footer fixed — đè lên BottomNav (z-index 50), trên bàn phím khi keyboard mở */}
         <div style={{
-          position: 'fixed', bottom: 60, zIndex: 51,
+          position: 'fixed', bottom: 0, zIndex: 55,
           left: '50%', transform: 'translateX(-50%)',
           width: '100%', maxWidth: 480,
           padding: '10px 16px',
