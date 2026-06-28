@@ -306,7 +306,8 @@ export default function KiemKe({ currentUser }) {
       so_luong_thuc_te: parseFloat(editForm.so_luong_thuc_te),
       ma_dvt_kiem: editForm.ma_dvt_kiem,
       he_so_quy_doi: parseFloat(editForm.he_so_quy_doi) || 1,
-      ghi_chu: editForm.ghi_chu
+      ghi_chu: editForm.ghi_chu,
+      ma_kho: editForm.ma_kho || null
     })
     if (navigator.onLine) pushOfflineQueue()
     await loadDanhSach()
@@ -534,7 +535,7 @@ export default function KiemKe({ currentUser }) {
                 {renderItemRow(item, (
                   <div style={{ display: 'flex', gap: 2 }}>
                     <button
-                      onClick={() => { setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '' }) }}
+                      onClick={() => { setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '', ma_kho: item.ma_kho ?? '' }) }}
                       style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#1a56db', lineHeight: 1 }}
                       title="Sửa">✏️</button>
                     <button
@@ -574,10 +575,20 @@ export default function KiemKe({ currentUser }) {
                     onChange={e => setEditForm(f => ({ ...f, he_so_quy_doi: e.target.value }))} min="0" step="any" />
                 </div>
               </div>
-              <div className="field-group" style={{ marginBottom: 14 }}>
-                <label className="field-label">Ghi chú</label>
-                <input type="text" className="input-field" value={editForm.ghi_chu}
-                  onChange={e => setEditForm(f => ({ ...f, ghi_chu: e.target.value }))} placeholder="Ghi chú..." />
+              <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Kho</label>
+                  <select className="input-select" value={editForm.ma_kho}
+                    onChange={e => setEditForm(f => ({ ...f, ma_kho: e.target.value }))}>
+                    <option value="">-- Chọn kho --</option>
+                    {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
+                  </select>
+                </div>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Ghi chú</label>
+                  <input type="text" className="input-field" value={editForm.ghi_chu}
+                    onChange={e => setEditForm(f => ({ ...f, ghi_chu: e.target.value }))} placeholder="Ghi chú..." />
+                </div>
               </div>
               <div className="row-2col">
                 <button className="btn-secondary" onClick={() => setEditItem(null)} disabled={editSaving}>Hủy</button>
