@@ -137,46 +137,123 @@ export default function BaoCao({ currentUser }) {
   ]
 
   useEffect(() => {
-    supabase.from('dm_kho').select('ma_kho,ten_kho').eq('active', true).order('ma_kho')
-      .then(({ data }) => setKhoList(data || []))
-    supabase.from('dm_user').select('id,ma_user,ho_ten,role').order('ho_ten')
-      .then(({ data }) => {
-        const map = {}
-        ;(data || []).forEach(u => { map[u.id] = u })
-        setUserMap(map)
-      })
-    supabase.from('dm_dvt').select('ma_dvt,ten_dvt')
-      .then(({ data }) => {
-        const map = {}
-        ;(data || []).forEach(d => { map[d.ma_dvt] = d.ten_dvt })
-        setDvtMap(map)
-        setDanhMucDvt(data || [])
-      })
-    supabase.from('dm_vat_tu').select('ma_vt,ten_vt,ma_dvt_chinh').eq('active', true)
-      .then(({ data }) => {
+    if (navigator.onLine) {
+      supabase.from('dm_kho').select('ma_kho,ten_kho').eq('active', true).order('ma_kho')
+        .then(({ data }) => setKhoList(data || []))
+      supabase.from('dm_user').select('id,ma_user,ho_ten,role').order('ho_ten')
+        .then(({ data }) => {
+          const map = {}
+          ;(data || []).forEach(u => { map[u.id] = u })
+          setUserMap(map)
+        })
+      supabase.from('dm_dvt').select('ma_dvt,ten_dvt')
+        .then(({ data }) => {
+          const map = {}
+          ;(data || []).forEach(d => { map[d.ma_dvt] = d.ten_dvt })
+          setDvtMap(map)
+          setDanhMucDvt(data || [])
+        })
+      supabase.from('dm_vat_tu').select('ma_vt,ten_vt,ma_dvt_chinh').eq('active', true)
+        .then(({ data }) => {
+          const mapDvt = {}, mapName = {}
+          ;(data || []).forEach(v => {
+            if (v.ma_dvt_chinh) mapDvt[v.ma_vt] = v.ma_dvt_chinh
+            mapName[v.ma_vt] = v.ten_vt || ''
+          })
+          setVtDvtChinhMap(mapDvt)
+          setVtNameMap(mapName)
+        })
+    } else {
+      Promise.all([
+        db.dm_kho.toArray(),
+        db.dm_user.toArray(),
+        db.dm_dvt.toArray(),
+        db.dm_vat_tu.filter(v => v.active !== false).toArray(),
+      ]).then(([khos, users, dvts, vts]) => {
+        setKhoList(khos)
+        const uMap = {}
+        users.forEach(u => { uMap[u.id] = u })
+        setUserMap(uMap)
+        const dMap = {}
+        dvts.forEach(d => { dMap[d.ma_dvt] = d.ten_dvt })
+        setDvtMap(dMap)
+        setDanhMucDvt(dvts)
         const mapDvt = {}, mapName = {}
-        ;(data || []).forEach(v => {
+        vts.forEach(v => {
           if (v.ma_dvt_chinh) mapDvt[v.ma_vt] = v.ma_dvt_chinh
           mapName[v.ma_vt] = v.ten_vt || ''
         })
         setVtDvtChinhMap(mapDvt)
         setVtNameMap(mapName)
       })
+    }
   }, [])
 
   useEffect(() => {
     upd('phien', [])
-    supabase.from('phien_kiem_ke')
-      .select('id,ma_kho,ke_toan_id,thu_kho_id,ngay_kiem')
-      .gte('ngay_kiem', f.tuNgay).lte('ngay_kiem', f.denNgay)
-      .order('ngay_kiem', { ascending: false })
-      .then(({ data }) => setPhienList(data || []))
+    if (navigator.onLine) {
+      supabase.from('phien_kiem_ke')
+        .select('id,ma_kho,ke_toan_id,thu_kho_id,ngay_kiem')
+        .gte('ngay_kiem', f.tuNgay).lte('ngay_kiem', f.denNgay)
+        .order('ngay_kiem', { ascending: false })
+        .then(({ data }) => setPhienList(data || []))
+    } else {
+      db.phien.filter(p => {
+        const d = (p.ngay_kiem || '').slice(0, 10)
+        return d >= f.tuNgay && d <= f.denNgay
+      }).toArray().then(rows => setPhienList(rows))
+    }
   }, [f.tuNgay, f.denNgay])
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setData([])
     try {
+      if (!navigator.onLine) {
+        const localKhoMap = Object.fromEntries(khoList.map(k => [k.ma_kho, k.ten_kho]))
+        const phienById = {}
+        phienList.forEach(p => { phienById[p.id] = p })
+
+        let targetPhienIds
+        if (f.keToan.length > 0 || f.thuKho.length > 0) {
+          let match = phienList
+          if (f.keToan.length > 0) match = match.filter(p => f.keToan.includes(p.ke_toan_id))
+          if (f.thuKho.length > 0) match = match.filter(p => f.thuKho.includes(p.thu_kho_id))
+          const matchIds = match.map(p => p.id)
+          const finalIds = f.phien.length > 0 ? matchIds.filter(id => f.phien.includes(id)) : matchIds
+          if (finalIds.length === 0) { setData([]); return }
+          targetPhienIds = new Set(finalIds)
+        } else if (f.phien.length > 0) {
+          targetPhienIds = new Set(f.phien)
+        } else {
+          targetPhienIds = new Set(Object.keys(phienById))
+        }
+
+        let rows = await db.chitiet.filter(r => {
+          if (!targetPhienIds.has(r.phien_id)) return false
+          if (f.kho.length > 0 && !f.kho.includes(r.ma_kho)) return false
+          if (tab === 'thua_thieu' && (!r.chenh_lech || r.chenh_lech === 0)) return false
+          return true
+        }).toArray()
+        rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+
+        setData(rows.map(r => {
+          const phien = phienById[r.phien_id] || {}
+          return {
+            ...r,
+            dm_kho: { ten_kho: localKhoMap[r.ma_kho] || r.ma_kho || '' },
+            phien_kiem_ke: {
+              ...phien,
+              dm_kho: { ten_kho: localKhoMap[phien.ma_kho] || phien.ma_kho || '' }
+            },
+            _ke_toan:    userMap[phien.ke_toan_id]?.ho_ten || '',
+            _thu_kho:    userMap[phien.thu_kho_id]?.ho_ten || '',
+            _nguoi_nhap: userMap[r.nguoi_nhap_id]?.ho_ten || '',
+          }
+        }))
+        return
+      }
+
       let q = supabase
         .from('kiem_ke_chitiet')
         .select('id,phien_id,ma_vt,ten_vt,ma_kho,dm_kho(ten_kho),ma_dvt_kiem,he_so_quy_doi,so_luong_thuc_te,so_luong_quy_doi,so_luong_so_sach,chenh_lech,ghi_chu,created_at,nguoi_nhap_id,phien_kiem_ke!inner(id,ma_kho,ngay_kiem,ke_toan_id,thu_kho_id,xac_nhan_ke_toan,xac_nhan_thu_kho,dm_kho(ten_kho))')
@@ -210,13 +287,19 @@ export default function BaoCao({ currentUser }) {
     } finally {
       setLoading(false)
     }
-  }, [tab, f.tuNgay, f.denNgay, f.kho, f.phien, f.keToan, f.thuKho, userMap, phienList])
+  }, [tab, f.tuNgay, f.denNgay, f.kho, f.phien, f.keToan, f.thuKho, userMap, phienList, khoList])
 
   useEffect(() => { loadData() }, [loadData])
 
   const loadTonKho = useCallback(async () => {
     setLoadingTonKho(true)
     try {
+      if (!navigator.onLine) {
+        let rows = await db.ton_kho.toArray()
+        if (f.kho.length > 0) rows = rows.filter(r => f.kho.includes(r.ma_kho))
+        setTonKhoRows(rows)
+        return
+      }
       let q = supabase.from('ton_kho').select('ma_vt,ma_kho,so_luong_so_sach').order('ma_kho').order('ma_vt')
       if (f.kho.length > 0) q = q.in('ma_kho', f.kho)
       const { data: rows } = await q
