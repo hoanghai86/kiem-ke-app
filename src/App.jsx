@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 import { db, clearSyncQueue } from './lib/db'
-import { pullDanhMuc, pushOfflineQueue } from './lib/sync'
+import { pullDanhMuc, pushOfflineQueue, subscribeVatTuRealtime } from './lib/sync'
 import BatDauPhien from './screens/BatDauPhien'
 import KiemKe from './screens/KiemKe'
 import DemLai from './screens/DemLai'
@@ -30,19 +30,19 @@ async function resolveProfile(userId) {
 export default function App() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
+  const unsubVatTu = useRef(null)
 
   useEffect(() => {
-    // Lấy session hiện tại
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
         const profile = await resolveProfile(session.user.id)
         setUser(profile)
         if (navigator.onLine) pullDanhMuc()
+        unsubVatTu.current = subscribeVatTuRealtime()
       }
       setLoading(false)
     })
 
-    // Listen auth change
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session) {
         const profile = await resolveProfile(session.user.id)
@@ -51,12 +51,17 @@ export default function App() {
           await pullDanhMuc()
           await pushOfflineQueue()
         }
+        unsubVatTu.current = subscribeVatTuRealtime()
       } else {
         setUser(null)
+        unsubVatTu.current?.()
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      subscription.unsubscribe()
+      unsubVatTu.current?.()
+    }
   }, [])
 
   if (loading) return <div className="loading-screen">Đang tải...</div>

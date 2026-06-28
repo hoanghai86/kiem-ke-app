@@ -157,6 +157,24 @@ export async function syncToGoogleSheet(phien_id) {
 }
 
 // -----------------------------------------------
+// Realtime: nhận thay đổi dm_vat_tu incremental
+// -----------------------------------------------
+export function subscribeVatTuRealtime() {
+  const channel = supabase
+    .channel('dm_vat_tu_changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_vat_tu' }, async payload => {
+      if (payload.eventType === 'DELETE') {
+        await db.dm_vat_tu.delete(payload.old.ma_vt)
+      } else {
+        await db.dm_vat_tu.put(payload.new)
+      }
+      console.log('[Realtime] dm_vat_tu:', payload.eventType, payload.new?.ma_vt ?? payload.old?.ma_vt)
+    })
+    .subscribe()
+  return () => supabase.removeChannel(channel)
+}
+
+// -----------------------------------------------
 // Listen online event → tự push queue
 // -----------------------------------------------
 export function startSyncListener() {
