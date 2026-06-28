@@ -511,14 +511,14 @@ export default function BaoCao({ currentUser }) {
     const isLocked = p?.xac_nhan_ke_toan || p?.xac_nhan_thu_kho
     const canEdit = !isLocked && (currentUser.role === 'admin' || detailItem.nguoi_nhap_id === currentUser.id)
     return (
-      <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
+      <div className="screen">
         <div className="topbar">
           <div className="topbar-title">{detailItem.ma_vt} · {detailItem.ten_vt}</div>
           <div className="topbar-sub">
             {editMode ? 'Chỉnh sửa' : 'Chi tiết'} · {detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || ''}
           </div>
         </div>
-        <div className="content" style={{ overflowY: 'auto', flex: 1 }}>
+        <div className="content" style={{ paddingBottom: 180 }}>
           {isLocked && (
             <div style={{ background: '#FEF3C7', color: '#92400E', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 13 }}>
               🔒 Phiên đã có xác nhận — không thể sửa/xóa
@@ -612,8 +612,14 @@ export default function BaoCao({ currentUser }) {
 
         </div>
 
-        {/* Footer — luôn nằm trên bàn phím ảo */}
-        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', background: '#fff', flexShrink: 0 }}>
+        {/* Footer fixed — đè lên content, nằm trên BottomNav, trên bàn phím khi keyboard mở */}
+        <div style={{
+          position: 'fixed', bottom: 60, zIndex: 51,
+          left: '50%', transform: 'translateX(-50%)',
+          width: '100%', maxWidth: 480,
+          padding: '10px 16px',
+          borderTop: '1px solid var(--border)', background: '#fff'
+        }}>
           {!editMode && canEdit && (
             <button onClick={handleDelete} disabled={saving} style={{
               marginBottom: 8, width: '100%',
