@@ -66,6 +66,7 @@ export default function Login({ onLogin }) {
     }
 
     await db.dm_user.put(profile)
+    localStorage.setItem('lastUserId', profile.id)
     if (navigator.onLine) await pullDanhMuc()
 
     onLogin(profile)

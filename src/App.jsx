@@ -32,14 +32,38 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const unsubVatTu = useRef(null)
 
+  // Đăng xuất chủ động: xóa lastUserId rồi mới signOut
+  const handleLogout = useCallback(async () => {
+    localStorage.removeItem('lastUserId')
+    setUser(null)
+    unsubVatTu.current?.()
+    await supabase.auth.signOut()
+  }, [])
+
   useEffect(() => {
     dbReady.then(() => {
       supabase.auth.getSession().then(async ({ data: { session } }) => {
         if (session) {
           const profile = await resolveProfile(session.user.id)
+          if (profile?.active === false) {
+            localStorage.removeItem('lastUserId')
+            await supabase.auth.signOut()
+            setLoading(false)
+            return
+          }
+          if (profile) localStorage.setItem('lastUserId', profile.id)
           setUser(profile)
           if (navigator.onLine) pullDanhMuc()
           unsubVatTu.current = subscribeVatTuRealtime()
+        } else if (!navigator.onLine) {
+          // Offline + token hết hạn: tự restore user đã đăng nhập trước đó từ IndexedDB
+          const lastUserId = localStorage.getItem('lastUserId')
+          if (lastUserId) {
+            const profile = await db.dm_user.get(lastUserId)
+            // Không restore nếu tài khoản đã bị khóa (cache cũ)
+            if (profile && profile.active !== false) setUser(profile)
+            else if (profile?.active === false) localStorage.removeItem('lastUserId')
+          }
         }
         setLoading(false)
       })
@@ -49,13 +73,32 @@ export default function App() {
       await dbReady
       if (session) {
         const profile = await resolveProfile(session.user.id)
+        if (profile?.active === false) {
+          // Tài khoản bị khóa — đăng xuất ngay
+          localStorage.removeItem('lastUserId')
+          setUser(null)
+          unsubVatTu.current?.()
+          await supabase.auth.signOut()
+          return
+        }
+        if (profile) localStorage.setItem('lastUserId', profile.id)
         setUser(profile)
         if (navigator.onLine) {
           await pullDanhMuc()
           await pushOfflineQueue()
+          // Re-check active sau khi pull data mới nhất từ server
+          const fresh = await db.dm_user.get(session.user.id)
+          if (fresh?.active === false) {
+            localStorage.removeItem('lastUserId')
+            setUser(null)
+            unsubVatTu.current?.()
+            await supabase.auth.signOut()
+            return
+          }
         }
         unsubVatTu.current = subscribeVatTuRealtime()
-      } else {
+      } else if (navigator.onLine) {
+        // Chỉ đăng xuất khi có mạng — offline thường là token hết hạn tạm, không phải logout thật
         setUser(null)
         unsubVatTu.current?.()
       }
@@ -72,21 +115,21 @@ export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={!user ? <Login onLogin={setUser} /> : <Navigate to="/" />} />
-        <Route path="/" element={user ? <BatDauPhien currentUser={user} /> : <Navigate to="/login" />} />
-        <Route path="/kiem-ke/:phienId" element={user ? <KiemKe currentUser={user} /> : <Navigate to="/login" />} />
-        <Route path="/dem-lai/:phienId" element={user ? <DemLai currentUser={user} /> : <Navigate to="/login" />} />
-        <Route path="/tong-hop/:phienId" element={user ? <TongHop currentUser={user} /> : <Navigate to="/login" />} />
-        <Route path="/admin" element={user?.role === 'admin' ? <Admin /> : <Navigate to="/" />} />
-        <Route path="/danh-muc" element={user?.role === 'admin' ? <DanhMuc /> : <Navigate to="/" />} />
-        <Route path="/account" element={user ? <Account currentUser={user} onUpdate={setUser} /> : <Navigate to="/login" />} />
-        <Route path="/bao-cao" element={user ? <BaoCao currentUser={user} /> : <Navigate to="/login" />} />
+        {/* replace: không tạo history entry mới → back button không bị trap ở /login */}
+        <Route path="/login" element={!user ? <Login onLogin={setUser} /> : <Navigate to="/" replace />} />
+        <Route path="/" element={user ? <BatDauPhien currentUser={user} /> : <Navigate to="/login" replace />} />
+        <Route path="/kiem-ke/:phienId" element={user ? <KiemKe currentUser={user} /> : <Navigate to="/login" replace />} />
+        <Route path="/dem-lai/:phienId" element={user ? <DemLai currentUser={user} /> : <Navigate to="/login" replace />} />
+        <Route path="/tong-hop/:phienId" element={user ? <TongHop currentUser={user} /> : <Navigate to="/login" replace />} />
+        <Route path="/admin" element={user?.role === 'admin' ? <Admin /> : <Navigate to="/" replace />} />
+        <Route path="/danh-muc" element={user?.role === 'admin' ? <DanhMuc /> : <Navigate to="/" replace />} />
+        <Route path="/account" element={user ? <Account currentUser={user} onUpdate={setUser} /> : <Navigate to="/login" replace />} />
+        <Route path="/bao-cao" element={user ? <BaoCao currentUser={user} /> : <Navigate to="/login" replace />} />
       </Routes>
 
-      {/* Sync FAB + Bottom nav — chỉ show khi đã login */}
       {user && <SyncButton />}
-      {user && <AccountButton currentUser={user} onLogout={() => supabase.auth.signOut()} />}
-      {user && <BottomNav role={user.role} currentUser={user} onLogout={() => supabase.auth.signOut()} />}
+      {user && <AccountButton currentUser={user} onLogout={handleLogout} />}
+      {user && <BottomNav role={user.role} currentUser={user} onLogout={handleLogout} />}
     </BrowserRouter>
   )
 }
