@@ -3,20 +3,30 @@ import { useState, useEffect, useRef } from 'react'
 import { db, getGoiYVatTu } from '../lib/db'
 import { Html5Qrcode } from 'html5-qrcode'
 
+function genMaVtNSS() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('')
+}
+
 export default function ChonVatTu({ onSelect, value }) {
   const [query, setQuery] = useState('')
-  const [goiY, setGoiY] = useState([])        // gần đây nhất
-  const [ketQua, setKetQua] = useState([])     // search results
+  const [goiY, setGoiY] = useState([])
+  const [ketQua, setKetQua] = useState([])
   const [showDropdown, setShowDropdown] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [showNSSForm, setShowNSSForm] = useState(false)
+  const [tenVtNSS, setTenVtNSS] = useState('')
+  const [maDvtNSS, setMaDvtNSS] = useState('')
+  const [dsDvt, setDsDvt] = useState([])
   const qrRef = useRef(null)
   const html5QrRef = useRef(null)
+  const tenVtRef = useRef(null)
 
   useEffect(() => {
     getGoiYVatTu(20).then(setGoiY)
+    db.dm_dvt.toArray().then(setDsDvt)
   }, [])
 
-  // Search theo tên hoặc mã
   useEffect(() => {
     if (!query.trim()) { setKetQua([]); return }
     const q = query.toLowerCase()
@@ -34,7 +44,26 @@ export default function ChonVatTu({ onSelect, value }) {
     setKetQua([])
   }
 
-  // QR scan
+  function openNSSForm() {
+    setShowDropdown(false)
+    setShowNSSForm(true)
+    setTenVtNSS('')
+    setMaDvtNSS(dsDvt[0]?.ma_dvt || '')
+    setTimeout(() => tenVtRef.current?.focus(), 100)
+  }
+
+  function confirmNSS() {
+    if (!tenVtNSS.trim()) return
+    onSelect({
+      ma_vt: genMaVtNSS(),
+      ten_vt: tenVtNSS.trim(),
+      ma_dvt_kiem: maDvtNSS,
+      ngoai_so_sach: true
+    })
+    setShowNSSForm(false)
+    setTenVtNSS('')
+  }
+
   async function startScan() {
     setScanning(true)
     const qr = new Html5Qrcode('qr-reader')
@@ -44,7 +73,6 @@ export default function ChonVatTu({ onSelect, value }) {
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         async (decodedText) => {
-          // decodedText = mã vật tư (VT012)
           const vt = await db.dm_vat_tu.get(decodedText)
           if (vt) {
             handleSelect(vt)
@@ -71,19 +99,25 @@ export default function ChonVatTu({ onSelect, value }) {
   const showGoiY = !query.trim() && showDropdown
   const showKetQua = query.trim() && showDropdown
 
+  const nssOption = (
+    <div className="dropdown-item" style={{ color: 'var(--green)', fontStyle: 'italic' }}
+      onMouseDown={e => { e.preventDefault(); openNSSForm() }}>
+      + Thêm ngoài sổ sách
+    </div>
+  )
+
   return (
     <div className="field-group" style={{ position: 'relative' }}>
       <label className="field-label">Mã / Tên vật tư</label>
 
-      {/* Input + QR button */}
       <div className="input-with-icon">
         <input
           type="text"
           className="input-field"
           placeholder="Gõ tên hoặc mã vật tư..."
           value={value?.ten_vt || query}
-          onChange={e => { setQuery(e.target.value); setShowDropdown(true) }}
-          onFocus={() => setShowDropdown(true)}
+          onChange={e => { setQuery(e.target.value); setShowDropdown(true); setShowNSSForm(false) }}
+          onFocus={() => { setShowDropdown(true); setShowNSSForm(false) }}
           onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
           readOnly={!!value}
         />
@@ -96,7 +130,6 @@ export default function ChonVatTu({ onSelect, value }) {
         )}
       </div>
 
-      {/* QR scanner modal */}
       {scanning && (
         <div className="qr-modal">
           <div className="qr-modal-inner">
@@ -108,7 +141,6 @@ export default function ChonVatTu({ onSelect, value }) {
         </div>
       )}
 
-      {/* Dropdown gợi ý */}
       {showGoiY && goiY.length > 0 && (
         <div className="dropdown">
           <div className="dropdown-section-title">Kiểm gần đây</div>
@@ -118,11 +150,11 @@ export default function ChonVatTu({ onSelect, value }) {
               <span className="item-ten">{item.ten_vt}</span>
             </div>
           ))}
+          {nssOption}
         </div>
       )}
 
-      {/* Dropdown search */}
-      {showKetQua && ketQua.length > 0 && (
+      {showKetQua && (
         <div className="dropdown">
           {ketQua.map(item => (
             <div key={item.ma_vt} className="dropdown-item" onMouseDown={() => handleSelect(item)}>
@@ -130,12 +162,43 @@ export default function ChonVatTu({ onSelect, value }) {
               <span className="item-ten">{item.ten_vt}</span>
             </div>
           ))}
+          {nssOption}
         </div>
       )}
 
-      {showKetQua && ketQua.length === 0 && (
-        <div className="dropdown">
-          <div className="dropdown-empty">Không tìm thấy vật tư</div>
+      {!showGoiY && !showKetQua && !showDropdown && showNSSForm && (
+        <div style={{
+          border: '1px solid var(--border)', borderRadius: 10,
+          padding: 12, marginTop: 6, background: '#F0FDF4'
+        }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)', marginBottom: 8 }}>
+            Mặt hàng ngoài sổ sách
+          </div>
+          <input
+            ref={tenVtRef}
+            type="text"
+            className="input-field"
+            placeholder="Tên vật tư *"
+            value={tenVtNSS}
+            onChange={e => setTenVtNSS(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && confirmNSS()}
+            style={{ marginBottom: 8 }}
+          />
+          <select className="input-select" value={maDvtNSS}
+            onChange={e => setMaDvtNSS(e.target.value)}
+            style={{ marginBottom: 10 }}>
+            {dsDvt.map(d => <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>)}
+          </select>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-primary" onClick={confirmNSS}
+              disabled={!tenVtNSS.trim()} style={{ flex: 1 }}>
+              Xác nhận
+            </button>
+            <button className="btn-secondary" onClick={() => setShowNSSForm(false)}
+              style={{ flex: 1 }}>
+              Hủy
+            </button>
+          </div>
         </div>
       )}
     </div>

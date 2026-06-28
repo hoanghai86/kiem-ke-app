@@ -196,3 +196,14 @@ alter table phien_kiem_ke
 
 alter table kiem_ke_chitiet
   add column if not exists ma_kho text references dm_kho(ma_kho);
+
+-- =============================================
+-- MIGRATION: Hỗ trợ mặt hàng ngoài sổ sách
+-- Chạy trong Supabase SQL Editor
+-- =============================================
+-- Bỏ FK ma_vt → dm_vat_tu để cho phép mã tạm (ngoài sổ sách)
+alter table kiem_ke_chitiet drop constraint if exists kiem_ke_chitiet_ma_vt_fkey;
+
+-- Thêm flag ngoài sổ sách
+alter table kiem_ke_chitiet
+  add column if not exists ngoai_so_sach boolean default false;

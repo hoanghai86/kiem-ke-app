@@ -21,6 +21,11 @@ db.version(2).stores({
   chitiet: 'id, phien_id, ma_vt, ma_kho, synced, created_at'
 })
 
+// v3: thêm ngoai_so_sach index
+db.version(3).stores({
+  chitiet: 'id, phien_id, ma_vt, ma_kho, ngoai_so_sach, synced, created_at'
+})
+
 // -----------------------------------------------
 // Helpers danh mục
 // -----------------------------------------------
@@ -123,7 +128,8 @@ export async function updateChiTiet(id, changes) {
   const soLuong = parseFloat(changes.so_luong_thuc_te ?? existing.so_luong_thuc_te)
   const heSo = parseFloat(changes.he_so_quy_doi ?? existing.he_so_quy_doi) || 1
   const soLuongQuyDoi = soLuong * heSo
-  const chenhLech = soLuongQuyDoi - (existing.so_luong_so_sach || 0)
+  const soLuongSoSach = changes.so_luong_so_sach ?? existing.so_luong_so_sach
+  const chenhLech = soLuongQuyDoi - (soLuongSoSach || 0)
   const updated = {
     ...existing, ...changes,
     so_luong_quy_doi: soLuongQuyDoi,

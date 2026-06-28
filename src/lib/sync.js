@@ -217,6 +217,7 @@ function toSupabaseChiTiet(r) {
     hinh_anh_urls: r.hinh_anh_urls,
     da_doi_chieu: r.da_doi_chieu,
     local_id: r.local_id,
-    nguoi_nhap_id: r.nguoi_nhap_id ?? null
+    nguoi_nhap_id: r.nguoi_nhap_id ?? null,
+    ngoai_so_sach: r.ngoai_so_sach ?? false
   }
 }

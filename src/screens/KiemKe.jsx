@@ -155,9 +155,14 @@ export default function KiemKe({ currentUser }) {
   async function handleChonVatTuCoDinh(vt) {
     setVatTuCoDinh(vt)
     if (vt) {
-      const ss = maKhoHienTai ? await getSoSach(vt.ma_vt, maKhoHienTai) : null
-      setSoSach(ss)
-      if (dvtChinhMap[vt.ma_vt]) setDvt(dvtChinhMap[vt.ma_vt])
+      if (vt.ngoai_so_sach) {
+        setSoSach(0)
+        if (vt.ma_dvt_kiem) setDvt(vt.ma_dvt_kiem)
+      } else {
+        const ss = maKhoHienTai ? await getSoSach(vt.ma_vt, maKhoHienTai) : null
+        setSoSach(ss)
+        if (dvtChinhMap[vt.ma_vt]) setDvt(dvtChinhMap[vt.ma_vt])
+      }
       setHeSo(1)
       setTimeout(() => soLuongRef.current?.focus(), 100)
     } else {
@@ -186,7 +191,8 @@ export default function KiemKe({ currentUser }) {
       ghi_chu: ghiChu,
       hinh_anh_urls: [],
       da_doi_chieu: false,
-      nguoi_nhap_id: currentUser.id
+      nguoi_nhap_id: currentUser.id,
+      ngoai_so_sach: vatTuCoDinh.ngoai_so_sach ?? false
     })
 
     if (navigator.onLine) pushOfflineQueue()

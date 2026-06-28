@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import { db, updateChiTiet, deleteChiTiet } from '../lib/db'
+import { db, updateChiTiet, deleteChiTiet, getSoSach } from '../lib/db'
 import { pushOfflineQueue } from '../lib/sync'
+import ChonVatTu from '../components/ChonVatTu'
 
 const TABS = [
-  { key: 'kiem_ke',    label: 'Kiểm kê' },
-  { key: 'thua_thieu', label: 'Thừa/Thiếu SS' },
-  { key: 'so_sanh',   label: 'So sánh KT/TK' },
-  { key: 'ton_kho',   label: 'Tồn kho SS' },
+  { key: 'kiem_ke',       label: 'Kiểm kê' },
+  { key: 'thua_thieu',    label: 'Thừa/Thiếu SS' },
+  { key: 'so_sanh',       label: 'So sánh KT/TK' },
+  { key: 'ton_kho',       label: 'Tồn kho SS' },
+  { key: 'ngoai_so_sach', label: 'Ngoài SS' },
 ]
 
 function buildCSVBlob(rows, cols, filename) {
@@ -74,6 +76,11 @@ export default function BaoCao({ currentUser }) {
   const [editMode, setEditMode]     = useState(false)
   const [form, setForm]             = useState({})
   const [saving, setSaving]         = useState(false)
+
+  // Ngoài sổ sách
+  const [nssItems, setNssItems]         = useState([])
+  const [loadingNSS, setLoadingNSS]     = useState(false)
+  const [reconcileItem, setReconcileItem] = useState(null)
 
   const upd = (key, val) => setF(prev => ({ ...prev, [key]: val }))
 
@@ -197,6 +204,46 @@ export default function BaoCao({ currentUser }) {
   }, [f.kho])
 
   useEffect(() => { if (tab === 'ton_kho') loadTonKho() }, [tab, loadTonKho])
+
+  const loadNSS = useCallback(async () => {
+    setLoadingNSS(true)
+    try {
+      let rows = await db.chitiet.where('ngoai_so_sach').equals(1).toArray()
+      if (currentUser.role !== 'admin') {
+        const myPhien = await db.phien.filter(p =>
+          p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id
+        ).toArray()
+        const myPhienIds = new Set(myPhien.map(p => p.id))
+        rows = rows.filter(r => myPhienIds.has(r.phien_id))
+      }
+      const phienIds = [...new Set(rows.map(r => r.phien_id))]
+      const phienMap = {}
+      for (const pid of phienIds) {
+        const p = await db.phien.get(pid)
+        if (p) phienMap[pid] = p
+      }
+      setNssItems(rows.map(r => ({ ...r, _phien: phienMap[r.phien_id] })))
+    } finally {
+      setLoadingNSS(false)
+    }
+  }, [currentUser])
+
+  useEffect(() => { if (tab === 'ngoai_so_sach') loadNSS() }, [tab, loadNSS])
+
+  async function doReconcile(item, vtDung) {
+    const soSachMoi = item._phien?.ma_kho
+      ? await getSoSach(vtDung.ma_vt, item._phien.ma_kho)
+      : null
+    await updateChiTiet(item.id, {
+      ma_vt: vtDung.ma_vt,
+      ten_vt: vtDung.ten_vt,
+      so_luong_so_sach: soSachMoi ?? 0,
+      ngoai_so_sach: false
+    })
+    if (navigator.onLine) pushOfflineQueue()
+    setReconcileItem(null)
+    loadNSS()
+  }
 
   const khoMap = Object.fromEntries(khoList.map(k => [k.ma_kho, k.ten_kho]))
 
@@ -587,7 +634,7 @@ export default function BaoCao({ currentUser }) {
         ))}
       </div>
 
-      {tab !== 'so_sanh' && (
+      {tab !== 'so_sanh' && tab !== 'ngoai_so_sach' && (
         <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           {tab === 'ton_kho' ? (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -624,7 +671,60 @@ export default function BaoCao({ currentUser }) {
       )}
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {tab === 'ton_kho' ? (
+        {tab === 'ngoai_so_sach' ? (
+          <>
+            {reconcileItem && (
+              <div style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+                zIndex: 100, display: 'flex', alignItems: 'flex-end'
+              }}>
+                <div style={{
+                  background: '#fff', width: '100%', maxWidth: 480, margin: '0 auto',
+                  borderRadius: '16px 16px 0 0', padding: 20
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>Chọn mã đúng</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                    Tên tạm: <b>{reconcileItem.ten_vt}</b>
+                  </div>
+                  <ChonVatTu value={null} onSelect={vt => vt && doReconcile(reconcileItem, vt)} />
+                  <button className="btn-secondary" onClick={() => setReconcileItem(null)}
+                    style={{ width: '100%', marginTop: 12 }}>Hủy</button>
+                </div>
+              </div>
+            )}
+            {loadingNSS ? (
+              <div className="empty-state">Đang tải...</div>
+            ) : nssItems.length === 0 ? (
+              <div className="empty-state">Không có mặt hàng ngoài sổ sách</div>
+            ) : nssItems.map((item, i) => {
+              const kho = item._phien?.ma_kho || item.ma_kho || ''
+              return (
+                <div key={item.id} style={{
+                  padding: '12px 16px', borderBottom: '1px solid var(--border)',
+                  background: i % 2 === 0 ? '#fff' : '#FAFAFA'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{item.ten_vt}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                        Mã tạm: {item.ma_vt} · Kho: {kho} · {item.ma_dvt_kiem || ''}
+                      </div>
+                      <div style={{ fontSize: 12, marginTop: 4 }}>
+                        SL kiểm: <b>{item.so_luong_thuc_te}</b>
+                        <span style={{ marginLeft: 12, color: '#D97706' }}>Chênh lệch: +{item.so_luong_thuc_te}</span>
+                      </div>
+                    </div>
+                    <button className="btn-secondary"
+                      onClick={() => setReconcileItem(item)}
+                      style={{ fontSize: 12, padding: '6px 10px', flexShrink: 0 }}>
+                      Chọn mã đúng
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </>
+        ) : tab === 'ton_kho' ? (
           loadingTonKho ? (
             <div className="empty-state">Đang tải...</div>
           ) : displayTonKho.length === 0 ? (
