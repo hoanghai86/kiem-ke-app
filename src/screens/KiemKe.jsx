@@ -980,6 +980,25 @@ export default function KiemKe({ currentUser }) {
                 color: 'var(--green-dark)', cursor: 'pointer'
               }}>{danhSach.length} dòng ↗</button>
             </div>
+            {checkedIds.size > 0 && (
+              confirmDeleteChecked ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, marginBottom: 6 }}>
+                  <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {checkedIds.size} dòng đã chọn?</span>
+                  <button onClick={handleDeleteChecked}
+                    style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Xóa</button>
+                  <button onClick={() => setConfirmDeleteChecked(false)}
+                    style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>Hủy</button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', marginBottom: 4 }}>
+                  <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Đã chọn {checkedIds.size} dòng</span>
+                  <button onClick={() => setCheckedIds(new Set())}
+                    style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>Bỏ chọn</button>
+                  <button onClick={() => setConfirmDeleteChecked(true)}
+                    style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Xóa đã chọn ({checkedIds.size})</button>
+                </div>
+              )
+            )}
             {danhSachHienThi.map(item => (
               <div key={item.id}
                 onClick={() => setCheckedIds(prev => {
