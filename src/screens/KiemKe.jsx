@@ -518,7 +518,15 @@ export default function KiemKe({ currentUser }) {
                   else setCheckedIds(new Set())
                 }}
                 style={{ marginRight: 10 }} />
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Chọn tất cả ({danhSachLoc.length})</span>
+              <span
+                onClick={() => {
+                  const allChecked = danhSachLoc.every(r => checkedIds.has(r.id))
+                  if (allChecked) setCheckedIds(new Set())
+                  else setCheckedIds(new Set(danhSachLoc.map(r => r.id)))
+                }}
+                style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                Chọn tất cả ({danhSachLoc.length})
+              </span>
             </div>
           )}
           {danhSachLoc.map(item => (
@@ -532,7 +540,7 @@ export default function KiemKe({ currentUser }) {
               <div style={{ paddingTop: 13, paddingRight: 8, flexShrink: 0 }}>
                 <input type="checkbox" checked={checkedIds.has(item.id)}
                   onChange={() => {}}
-                  onClick={e => e.stopPropagation()} />
+                  onClick={e => { e.stopPropagation(); setCheckedIds(prev => { const next = new Set(prev); next.has(item.id) ? next.delete(item.id) : next.add(item.id); return next }) }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {renderItemRow(item, (
@@ -1008,7 +1016,8 @@ export default function KiemKe({ currentUser }) {
                 })}
                 style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', background: checkedIds.has(item.id) ? '#F0FDF4' : 'transparent', cursor: 'pointer' }}>
                 <div style={{ paddingTop: 13, paddingRight: 8, flexShrink: 0 }}>
-                  <input type="checkbox" checked={checkedIds.has(item.id)} onChange={() => {}} onClick={e => e.stopPropagation()} />
+                  <input type="checkbox" checked={checkedIds.has(item.id)} onChange={() => {}}
+                    onClick={e => { e.stopPropagation(); setCheckedIds(prev => { const next = new Set(prev); next.has(item.id) ? next.delete(item.id) : next.add(item.id); return next }) }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   {renderItemRow(item, (
@@ -1050,6 +1059,78 @@ export default function KiemKe({ currentUser }) {
           {saving ? 'Đang lưu...' : '+ Lưu & đếm tiếp'}
         </button>
       </div>
+
+      {/* Edit modal — dùng chung cho cả preview rows và xemDanhSach */}
+      {editItem && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'flex-end' }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: 480, margin: '0 auto', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', maxHeight: '90dvh' }}>
+            <div style={{ padding: '20px 16px 4px', flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>
+                Sửa · {editItem.ma_vt} · {editItem.ten_vt}
+              </div>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px' }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Số lượng</label>
+                  <input type="number" className="input-field input-large" value={editForm.so_luong_thuc_te}
+                    onChange={e => setEditForm(f => ({ ...f, so_luong_thuc_te: e.target.value }))} min="0" step="any" />
+                </div>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">ĐVT</label>
+                  <select className="input-select" value={editForm.ma_dvt_kiem}
+                    onChange={e => setEditForm(f => ({ ...f, ma_dvt_kiem: e.target.value }))}>
+                    {danhMucDvt.map(d => <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Hệ số</label>
+                  <input type="number" className="input-field" value={editForm.he_so_quy_doi}
+                    onChange={e => setEditForm(f => ({ ...f, he_so_quy_doi: e.target.value }))} min="0" step="any" />
+                </div>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">SL quy đổi</label>
+                  <div className="input-readonly">
+                    {(() => {
+                      const sl = parseFloat(editForm.so_luong_thuc_te)
+                      const hs = parseFloat(editForm.he_so_quy_doi) || 1
+                      if (isNaN(sl) || !editItem) return '—'
+                      const maChinh = dvtChinhMap[editItem.ma_vt]
+                      const tenChinh = maChinh ? (dvtNameMap[maChinh] || maChinh) : (dvtNameMap[editForm.ma_dvt_kiem] || editForm.ma_dvt_kiem || '')
+                      return `${fmtSL(sl * hs)} ${tenChinh}`
+                    })()}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Kho</label>
+                  <select className="input-select" value={editForm.ma_kho}
+                    onChange={e => setEditForm(f => ({ ...f, ma_kho: e.target.value }))}>
+                    <option value="">-- Chọn kho --</option>
+                    {danhMucKho.map(k => <option key={k.ma_kho} value={k.ma_kho}>{k.ten_kho}</option>)}
+                  </select>
+                </div>
+                <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
+                  <label className="field-label">Ghi chú</label>
+                  <input type="text" className="input-field" value={editForm.ghi_chu}
+                    onChange={e => setEditForm(f => ({ ...f, ghi_chu: e.target.value }))} placeholder="Ghi chú..." />
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: '12px 16px 32px', flexShrink: 0, borderTop: '1px solid var(--border)' }}>
+              <div className="row-2col">
+                <button className="btn-secondary" onClick={() => setEditItem(null)} disabled={editSaving}>Hủy</button>
+                <button className="btn-primary" onClick={handleUpdateItem} disabled={editSaving}>
+                  {editSaving ? 'Đang lưu...' : 'Lưu'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
