@@ -90,6 +90,10 @@ export default function BaoCao({ currentUser }) {
   const [filterModalSel, setFilterModalSel] = useState([])
   const filterModalRef = useRef(null)
 
+  // Edit kho fullscreen modal
+  const [openEditKhoModal, setOpenEditKhoModal] = useState(false)
+  const [editKhoQ, setEditKhoQ] = useState('')
+
   // Vật tư filter fullscreen modal
   const [openVatTuModal, setOpenVatTuModal] = useState(false)
   const [vatTuModalQ, setVatTuModalQ]       = useState('')
@@ -450,6 +454,7 @@ export default function BaoCao({ currentUser }) {
       ma_dvt_kiem: row.ma_dvt_kiem || '',
       he_so_quy_doi: row.he_so_quy_doi ?? 1,
       ghi_chu: row.ghi_chu || '',
+      ma_kho: row.ma_kho || '',
     })
   }
 
@@ -466,6 +471,7 @@ export default function BaoCao({ currentUser }) {
       ma_dvt_kiem: form.ma_dvt_kiem,
       he_so_quy_doi: parseFloat(form.he_so_quy_doi) || 1,
       ghi_chu: form.ghi_chu,
+      ma_kho: form.ma_kho || null,
     })
     if (navigator.onLine) pushOfflineQueue()
     // Cập nhật lại dòng trong state mà không cần re-fetch
@@ -505,7 +511,7 @@ export default function BaoCao({ currentUser }) {
     const isLocked = p?.xac_nhan_ke_toan || p?.xac_nhan_thu_kho
     const canEdit = !isLocked && (currentUser.role === 'admin' || detailItem.nguoi_nhap_id === currentUser.id)
     return (
-      <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden' }}>
         <div className="topbar">
           <div className="topbar-title">{detailItem.ma_vt} · {detailItem.ten_vt}</div>
           <div className="topbar-sub">
@@ -566,20 +572,31 @@ export default function BaoCao({ currentUser }) {
             </div>
           </div>
 
-          <div className="field-group">
-            <label className="field-label">Ghi chú</label>
-            {editMode
-              ? <input type="text" className="input-field"
-                  value={form.ghi_chu}
-                  onChange={e => setForm(f => ({ ...f, ghi_chu: e.target.value }))}
-                  placeholder="Nhập ghi chú..." />
-              : <div className="input-readonly">{detailItem.ghi_chu || '—'}</div>
-            }
+          <div className="row-2col">
+            <div className="field-group">
+              <label className="field-label">Kho</label>
+              {editMode
+                ? <div className="input-select" onClick={() => { setEditKhoQ(''); setOpenEditKhoModal(true) }}
+                    style={{ cursor: 'pointer', color: form.ma_kho ? 'var(--text)' : 'var(--text-muted)' }}>
+                    {form.ma_kho ? (khoList.find(k => k.ma_kho === form.ma_kho)?.ten_kho || form.ma_kho) : '-- Chọn kho --'}
+                  </div>
+                : <div className="input-readonly">{detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || '—'}</div>
+              }
+            </div>
+            <div className="field-group">
+              <label className="field-label">Ghi chú</label>
+              {editMode
+                ? <input type="text" className="input-field"
+                    value={form.ghi_chu}
+                    onChange={e => setForm(f => ({ ...f, ghi_chu: e.target.value }))}
+                    placeholder="Nhập ghi chú..." />
+                : <div className="input-readonly">{detailItem.ghi_chu || '—'}</div>
+              }
+            </div>
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {[
-              ['Kho',        detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || '—'],
               ['Người nhập', detailItem._nguoi_nhap || '—'],
               ['Phiên',      detailItem.phien_id ? '#' + detailItem.phien_id.slice(-4).toUpperCase() : '—'],
               ['Thời gian',  detailItem.created_at ? new Date(detailItem.created_at).toLocaleString('vi-VN') : '—'],
@@ -593,7 +610,21 @@ export default function BaoCao({ currentUser }) {
             ))}
           </div>
 
-          <div className={editMode || canEdit ? 'row-2col' : ''} style={{ marginTop: 16 }}>
+        </div>
+
+        {/* Footer — luôn nằm trên bàn phím ảo */}
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', background: '#fff', flexShrink: 0 }}>
+          {!editMode && canEdit && (
+            <button onClick={handleDelete} disabled={saving} style={{
+              marginBottom: 8, width: '100%',
+              padding: '10px', borderRadius: 8, border: '1.5px solid #FCA5A5',
+              background: '#FEF2F2', color: '#DC2626',
+              fontSize: 14, fontWeight: 500, cursor: 'pointer'
+            }}>
+              {saving ? 'Đang xóa...' : 'Xóa dòng này'}
+            </button>
+          )}
+          <div className={editMode || canEdit ? 'row-2col' : ''}>
             <button className="btn-secondary" onClick={closeDetail} disabled={saving}
               style={!editMode && !canEdit ? { width: '100%' } : {}}>
               {editMode ? 'Hủy' : 'Đóng'}
@@ -608,18 +639,43 @@ export default function BaoCao({ currentUser }) {
               </button>
             ) : null}
           </div>
-
-          {!editMode && canEdit && (
-            <button onClick={handleDelete} disabled={saving} style={{
-              marginTop: 8, width: '100%',
-              padding: '10px', borderRadius: 8, border: '1.5px solid #FCA5A5',
-              background: '#FEF2F2', color: '#DC2626',
-              fontSize: 14, fontWeight: 500, cursor: 'pointer'
-            }}>
-              {saving ? 'Đang xóa...' : 'Xóa dòng này'}
-            </button>
-          )}
         </div>
+
+        {openEditKhoModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <button onClick={() => { setOpenEditKhoModal(false); setEditKhoQ('') }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', padding: 0, color: 'var(--text)' }}>✕</button>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Chọn kho</span>
+              </div>
+              <input type="text" className="input-field" placeholder="Tìm kho..."
+                value={editKhoQ} onChange={e => setEditKhoQ(e.target.value)} autoFocus />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {khoList
+                .filter(k => !editKhoQ.trim() ||
+                  k.ten_kho.toLowerCase().includes(editKhoQ.toLowerCase()) ||
+                  k.ma_kho.toLowerCase().includes(editKhoQ.toLowerCase()))
+                .map(k => {
+                  const selected = form.ma_kho === k.ma_kho
+                  return (
+                    <div key={k.ma_kho}
+                      onClick={() => { setForm(f => ({ ...f, ma_kho: k.ma_kho })); setOpenEditKhoModal(false); setEditKhoQ('') }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: selected ? '#F0FDF4' : '#fff' }}>
+                      <div style={{ width: 20, height: 20, borderRadius: '50%', border: `2px solid ${selected ? 'var(--green)' : '#D1D5DB'}`, background: selected ? 'var(--green)' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {selected && <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff' }} />}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 14 }}>{k.ten_kho}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{k.ma_kho}</div>
+                      </div>
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
