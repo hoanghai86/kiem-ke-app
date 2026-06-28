@@ -591,15 +591,42 @@ export default function BaoCao({ currentUser }) {
         <div className="topbar-sub">{rowCount} dòng</div>
       </div>
 
-      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, alignItems: 'center' }}>
-        <span style={{ flex: 1, fontSize: 13, color: 'var(--text-muted)' }}>
+      <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 16, alignItems: 'center' }}>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           {tab === 'ton_kho'
             ? (f.kho.length > 0 ? `Kho: ${fldLabel('kho')}` : 'Tất cả kho')
             : activeFilterCount > 0 ? `Ngày: ${dateLabel}` : `Hôm nay: ${dateLabel}`}
         </span>
+        {tab !== 'ngoai_so_sach' && (() => {
+          const linkStyle = { border: 'none', background: 'none', fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap', color: 'var(--green)', fontWeight: 600 }
+          if (tab === 'ton_kho') return <>
+            <button style={linkStyle} disabled={!displayTonKho.length} onClick={() => exportCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}>⬇ CSV</button>
+            <button style={linkStyle} disabled={!displayTonKho.length} onClick={() => shareCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}>⬆ Chia sẻ</button>
+          </>
+          if (tab === 'so_sanh') {
+            const colSS = [
+              { label: 'Mã VT', get: r => r.ma_vt },
+              { label: 'Tên vật tư', get: r => r.ten_vt },
+              { label: 'Kho', get: r => r.kho || '' },
+              { label: 'Phiên', get: r => r.phien },
+              { label: 'SL Kế toán', get: r => r.sl_kt ?? '' },
+              { label: 'SL Thủ kho', get: r => r.sl_tk ?? '' },
+              { label: 'Lệch KT-TK', get: r => r.sl_kt !== null && r.sl_tk !== null ? (r.sl_kt - r.sl_tk) : '' },
+            ]
+            return <>
+              <button style={linkStyle} disabled={!soSanhRows.length} onClick={() => exportCSV(soSanhRows, colSS, 'SoSanhKTTK.csv')}>⬇ CSV</button>
+              <button style={linkStyle} disabled={!soSanhRows.length} onClick={() => shareCSV(soSanhRows, colSS, 'SoSanhKTTK.csv')}>⬆ Chia sẻ</button>
+            </>
+          }
+          return <>
+            <button style={linkStyle} disabled={!displayData.length} onClick={() => exportCSV(displayData, cols, filename)}>⬇ CSV</button>
+            <button style={linkStyle} disabled={!displayData.length} onClick={() => shareCSV(displayData, cols, filename)}>⬆ Chia sẻ</button>
+          </>
+        })()}
+        <span style={{ flex: 1 }} />
         {activeFilterCount > 0 && (
           <button onClick={() => setF(INIT_FILTERS)} style={{
-            border: 'none', background: 'none', color: 'var(--green)',
+            border: 'none', background: 'none', color: 'var(--text-muted)',
             fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap'
           }}>Xóa lọc</button>
         )}
@@ -718,42 +745,7 @@ export default function BaoCao({ currentUser }) {
           }}>{t.label}</button>
         ))}
       </div>
-
-      {tab !== 'so_sanh' && tab !== 'ngoai_so_sach' && (
-        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          {tab === 'ton_kho' ? (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn-secondary"
-                onClick={() => exportCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}
-                disabled={!displayTonKho.length}
-                style={{ flex: 1, fontSize: 13 }}>
-                ⬇ Xuất CSV ({displayTonKho.length})
-              </button>
-              <button className="btn-secondary"
-                onClick={() => shareCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}
-                disabled={!displayTonKho.length}
-                style={{ flex: 1, fontSize: 13 }}>
-                ⬆ Chia sẻ
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn-secondary"
-                onClick={() => exportCSV(displayData, cols, filename)}
-                disabled={!displayData.length}
-                style={{ flex: 1, fontSize: 13 }}>
-                ⬇ Xuất CSV ({displayData.length})
-              </button>
-              <button className="btn-secondary"
-                onClick={() => shareCSV(displayData, cols, filename)}
-                disabled={!displayData.length}
-                style={{ flex: 1, fontSize: 13 }}>
-                ⬆ Chia sẻ
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      <div style={{ height: 6, background: '#F3F4F6', flexShrink: 0 }} />
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
         {tab === 'ngoai_so_sach' ? (
@@ -771,22 +763,19 @@ export default function BaoCao({ currentUser }) {
             ) : nssItems.map(item => {
               const maKho = item.ma_kho || item._phien?.ma_kho || ''
               const tenKho = khoList.find(k => k.ma_kho === maKho)?.ten_kho || maKho
-              const gio = item.created_at ? new Date(item.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }) : ''
               return (
-                <div key={item.id} className="item-row" style={{ cursor: 'default', padding: '10px 16px', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                    <div className="item-name" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 16px', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <span className="item-code">{item.ma_vt}</span> · {item.ten_vt}
                     </div>
-                    <span className="lot-tag" style={{ background: '#FEF3C7', color: '#D97706', flexShrink: 0 }}>Ngoài SS{item._allIds?.length > 1 ? ` · ${item._allIds.length} dòng` : ''}</span>
+                    <div className="item-meta" style={{ marginTop: 1 }}>
+                      {[tenKho, item._allIds?.length > 1 ? `${item._allIds.length} dòng` : null].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
-                  <div className="item-meta" style={{ marginTop: 2 }}>
-                    {tenKho || ''}
-                  </div>
-                  <button className="btn-primary"
-                    onClick={() => setReconcileItem(item)}
-                    style={{ fontSize: 13, width: '100%', marginTop: 8 }}>
-                    Chọn mã đúng
+                  <button onClick={() => setReconcileItem(item)}
+                    style={{ flexShrink: 0, padding: '5px 10px', borderRadius: 6, border: '1.5px solid var(--green)', background: 'var(--green-light)', color: 'var(--green-dark)', fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    Chọn mã
                   </button>
                 </div>
               )
