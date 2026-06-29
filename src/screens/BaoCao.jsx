@@ -414,8 +414,15 @@ export default function BaoCao({ currentUser }) {
     ? afterRole.filter(r => f.vatTu.includes(r.ma_vt))
     : afterRole
 
-  // Tab Thừa/Thiếu SS: group by ma_vt, SUM các trường số
+  // Tab Thừa/Thiếu SS: group by ma_vt, SUM sl_quy_doi; sl_so_sach đếm 1 lần mỗi (ma_vt, ma_kho)
   const displayDataFinal = tab !== 'thua_thieu' ? displayData : (() => {
+    // Dedup so_luong_so_sach: chỉ lấy giá trị đầu tiên cho mỗi cặp (ma_vt, ma_kho)
+    const ssPerKho = new Map()
+    for (const r of displayData) {
+      const key = `${r.ma_vt}__${r.ma_kho ?? ''}`
+      if (!ssPerKho.has(key) && r.so_luong_so_sach != null) ssPerKho.set(key, r.so_luong_so_sach)
+    }
+
     const map = new Map()
     for (const r of displayData) {
       if (!map.has(r.ma_vt)) {
@@ -424,11 +431,20 @@ export default function BaoCao({ currentUser }) {
       const g = map.get(r.ma_vt)
       g.so_luong_thuc_te += r.so_luong_thuc_te ?? 0
       g.so_luong_quy_doi += r.so_luong_quy_doi ?? 0
-      if (r.so_luong_so_sach != null) g.so_luong_so_sach = (g.so_luong_so_sach ?? 0) + r.so_luong_so_sach
-      g.chenh_lech += r.chenh_lech ?? 0
       if (!g.ma_dvt_kiem && r.ma_dvt_kiem) g.ma_dvt_kiem = r.ma_dvt_kiem
       if (!g.he_so_quy_doi && r.he_so_quy_doi) g.he_so_quy_doi = r.he_so_quy_doi
     }
+
+    // Cộng sl_so_sach mỗi (ma_vt, ma_kho) đúng 1 lần
+    for (const [key, ss] of ssPerKho) {
+      const maVt = key.slice(0, key.lastIndexOf('__'))
+      const g = map.get(maVt)
+      if (g) g.so_luong_so_sach = (g.so_luong_so_sach ?? 0) + ss
+    }
+
+    // Tính lại chenh_lech từ tổng quy đổi và sl_so_sach đã dedup
+    for (const g of map.values()) g.chenh_lech = g.so_luong_quy_doi - (g.so_luong_so_sach ?? 0)
+
     return [...map.values()]
   })()
 
