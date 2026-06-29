@@ -87,7 +87,7 @@ export default function Admin() {
     try {
       if (editUser) {
         const { error } = await supabase.from('dm_user')
-          .update({ ma_user: ma_user.trim(), ho_ten: ho_ten.trim(), role, email: email.trim() })
+          .update({ ma_user: ma_user.trim(), ho_ten: ho_ten.trim(), role })
           .eq('id', editUser.id)
         if (error) throw new Error(error.message)
 
@@ -216,7 +216,12 @@ export default function Admin() {
             <label className="field-label">Email {!editUser && '*'}</label>
             <input className="input-field" type="email" value={userForm.email}
               onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="email@company.com" />
+              placeholder="email@company.com"
+              disabled={!!editUser}
+              style={editUser ? { background: 'var(--bg-secondary)', color: 'var(--text-muted)' } : {}} />
+            {editUser && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              Để đổi email, vui lòng cập nhật trực tiếp trong Supabase Authentication.
+            </div>}
           </div>
 
           <div className="field-group">
