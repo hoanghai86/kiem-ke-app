@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { db, toggleDoiChieu, updateChiTiet, deleteChiTiet } from '../lib/db'
+import { toSearchable } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue } from '../lib/sync'
 import { fmtSL } from '../lib/utils'
@@ -456,9 +457,9 @@ export default function DemLai({ currentUser }) {
     : []
 
   // Lọc theo mã/tên vật tư (text search)
-  const kw = filterVatTu.trim().toLowerCase()
+  const kw = toSearchable(filterVatTu)
   const afterVatTuFilter = kw
-    ? filteredSummary.filter(g => g.ma_vt.toLowerCase().includes(kw) || g.ten_vt.toLowerCase().includes(kw))
+    ? filteredSummary.filter(g => toSearchable(g.ma_vt).includes(kw) || toSearchable(g.ten_vt).includes(kw))
     : filteredSummary
 
   const hasFilters = !!(filterKho || filterVatTu)

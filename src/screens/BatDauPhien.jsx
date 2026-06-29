@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { db, createPhienLocal, updatePhienLocal, deletePhienLocal } from '../lib/db'
+import { toSearchable } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 
 const toLocalDate = (d = new Date()) =>
@@ -570,8 +571,8 @@ export default function BatDauPhien({ currentUser }) {
         const list = isKT ? danhMucKeToan : danhMucThuKho
         const currentVal = isKT ? filters.keToanId : filters.thuKhoId
         const filterKey = isKT ? 'keToanId' : 'thuKhoId'
-        const q = filterModalQ.trim().toLowerCase()
-        const results = q ? list.filter(u => u.ho_ten.toLowerCase().includes(q)) : list
+        const q = toSearchable(filterModalQ)
+        const results = q ? list.filter(u => toSearchable(u.ho_ten).includes(q)) : list
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
             <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>

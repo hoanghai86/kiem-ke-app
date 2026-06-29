@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { db, saveChiTietLocal, getSoSach, deleteChiTiet, updateChiTiet } from '../lib/db'
+import { toSearchable } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 import { pushOfflineQueue, syncChiTietNow } from '../lib/sync'
 import { fmtSL } from '../lib/utils'
@@ -386,19 +387,19 @@ export default function KiemKe({ currentUser }) {
     const khoInDanhSach = [...new Map(danhSach.map(r => [r.ma_kho, danhMucKho.find(k => k.ma_kho === r.ma_kho) || { ma_kho: r.ma_kho, ten_kho: r.ma_kho }])).values()]
       .sort((a, b) => (a.ten_kho || '').localeCompare(b.ten_kho || ''))
     const khoFilterResults = khoFilterQ.trim()
-      ? khoInDanhSach.filter(k => k.ten_kho.toLowerCase().includes(khoFilterQ.toLowerCase()) || k.ma_kho.toLowerCase().includes(khoFilterQ.toLowerCase()))
+      ? khoInDanhSach.filter(k => toSearchable(k.ten_kho).includes(toSearchable(khoFilterQ)) || toSearchable(k.ma_kho).includes(toSearchable(khoFilterQ)))
       : khoInDanhSach
 
     const dvtInDanhSach = [...new Map(danhSach.filter(r => r.ma_dvt_kiem).map(r => [r.ma_dvt_kiem, { ma_dvt: r.ma_dvt_kiem, ten_dvt: danhMucDvt.find(d => d.ma_dvt === r.ma_dvt_kiem)?.ten_dvt || r.ma_dvt_kiem }])).values()]
       .sort((a, b) => (a.ten_dvt || '').localeCompare(b.ten_dvt || ''))
     const dvtFilterResults = dvtFilterQ.trim()
-      ? dvtInDanhSach.filter(d => d.ten_dvt.toLowerCase().includes(dvtFilterQ.toLowerCase()) || d.ma_dvt.toLowerCase().includes(dvtFilterQ.toLowerCase()))
+      ? dvtInDanhSach.filter(d => toSearchable(d.ten_dvt).includes(toSearchable(dvtFilterQ)) || toSearchable(d.ma_dvt).includes(toSearchable(dvtFilterQ)))
       : dvtInDanhSach
 
     const vtInDanhSach = [...new Map(danhSach.map(r => [r.ma_vt, { ma_vt: r.ma_vt, ten_vt: r.ten_vt }])).values()]
       .sort((a, b) => a.ma_vt.localeCompare(b.ma_vt))
     const vtModalResults = vtModalQ.trim()
-      ? vtInDanhSach.filter(v => v.ma_vt.toLowerCase().includes(vtModalQ.toLowerCase()) || v.ten_vt.toLowerCase().includes(vtModalQ.toLowerCase()))
+      ? vtInDanhSach.filter(v => toSearchable(v.ma_vt).includes(toSearchable(vtModalQ)) || toSearchable(v.ten_vt).includes(toSearchable(vtModalQ)))
       : vtInDanhSach
 
     return (
@@ -823,7 +824,7 @@ export default function KiemKe({ currentUser }) {
             </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {danhMucKho
-                .filter(k => !khoQuery.trim() || k.ten_kho.toLowerCase().includes(khoQuery.toLowerCase()) || k.ma_kho.toLowerCase().includes(khoQuery.toLowerCase()))
+                .filter(k => !khoQuery.trim() || toSearchable(k.ten_kho).includes(toSearchable(khoQuery)) || toSearchable(k.ma_kho).includes(toSearchable(khoQuery)))
                 .map(k => (
                   <div key={k.ma_kho} onClick={() => handleSelectKho(k.ma_kho)} style={{
                     padding: '14px 16px', borderBottom: '1px solid #F3F4F6',
@@ -919,7 +920,7 @@ export default function KiemKe({ currentUser }) {
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {danhMucDvt
-                  .filter(d => !dvtQuery.trim() || d.ten_dvt.toLowerCase().includes(dvtQuery.toLowerCase()) || d.ma_dvt.toLowerCase().includes(dvtQuery.toLowerCase()))
+                  .filter(d => !dvtQuery.trim() || toSearchable(d.ten_dvt).includes(toSearchable(dvtQuery)) || toSearchable(d.ma_dvt).includes(toSearchable(dvtQuery)))
                   .map(d => (
                     <div key={d.ma_dvt} onClick={() => { setDvt(d.ma_dvt); setOpenDvtModal(false); setDvtQuery('') }} style={{
                       padding: '14px 16px', borderBottom: '1px solid #F3F4F6',

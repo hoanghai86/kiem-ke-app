@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
+import { toSearchable } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 import { pullDanhMuc } from '../lib/sync'
 
@@ -524,15 +525,15 @@ export default function DanhMuc({ inline = false }) {
   }
 
   // Lọc danh sách theo search — hỗ trợ nhiều từ khóa cách nhau bằng dấu phẩy
-  const terms = search.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+  const terms = search.split(',').map(t => toSearchable(t)).filter(Boolean)
   const filtered = list.filter(r => {
     if (!terms.length) return true
     const text = tab === 'kho'     ? `${r.ma_kho} ${r.ten_kho}`
                : tab === 'dvt'     ? `${r.ma_dvt} ${r.ten_dvt}`
                : tab === 'ton_kho' ? `${r.ma_vt} ${r.ten_vt} ${r.ma_kho}`
                : `${r.ma_vt} ${r.ten_vt}`
-    const lower = text.toLowerCase()
-    return terms.some(t => lower.includes(t))
+    const s = toSearchable(text)
+    return terms.some(t => s.includes(t))
   })
 
   const totalPages    = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -690,8 +691,8 @@ export default function DanhMuc({ inline = false }) {
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {vatTuOptions
                 .filter(v => !vtModalQ.trim() ||
-                  v.ma_vt.toLowerCase().includes(vtModalQ.toLowerCase()) ||
-                  (v.ten_vt || '').toLowerCase().includes(vtModalQ.toLowerCase()))
+                  toSearchable(v.ma_vt).includes(toSearchable(vtModalQ)) ||
+                  toSearchable(v.ten_vt).includes(toSearchable(vtModalQ)))
                 .map(v => (
                   <div key={v.ma_vt}
                     onClick={() => {
@@ -727,8 +728,8 @@ export default function DanhMuc({ inline = false }) {
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {khoList
                 .filter(k => !khoModalQ.trim() ||
-                  k.ma_kho.toLowerCase().includes(khoModalQ.toLowerCase()) ||
-                  k.ten_kho.toLowerCase().includes(khoModalQ.toLowerCase()))
+                  toSearchable(k.ma_kho).includes(toSearchable(khoModalQ)) ||
+                  toSearchable(k.ten_kho).includes(toSearchable(khoModalQ)))
                 .map(k => {
                   const selected = form.ma_kho === k.ma_kho
                   return (

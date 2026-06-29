@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { toSearchable } from '../lib/utils'
 import DanhMuc from './DanhMuc'
 
 const ROLE_LABEL = { ke_toan: 'Kế toán', thu_kho: 'Thủ kho', admin: 'Admin' }
@@ -311,12 +312,12 @@ export default function Admin() {
             {loadingUser ? (
               <div className="empty-state">Đang tải...</div>
             ) : (() => {
-              const terms = userSearch.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+              const terms = userSearch.split(',').map(t => toSearchable(t)).filter(Boolean)
               const filtered = danhSachUser.filter(u => {
                 if (filterRole !== 'all' && u.role !== filterRole) return false
                 if (filterActive !== 'all' && String(u.active) !== filterActive) return false
                 if (terms.length) {
-                  const text = `${u.ma_user} ${u.ho_ten} ${u.email || ''}`.toLowerCase()
+                  const text = toSearchable(`${u.ma_user} ${u.ho_ten} ${u.email || ''}`)
                   if (!terms.some(t => text.includes(t))) return false
                 }
                 return true

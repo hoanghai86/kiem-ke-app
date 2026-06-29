@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import * as XLSX from 'xlsx'
+import { toSearchable } from '../lib/utils'
 import { supabase } from '../lib/supabase'
 import { db, updateChiTiet, deleteChiTiet, getSoSach } from '../lib/db'
 import { pushOfflineQueue } from '../lib/sync'
@@ -365,10 +366,10 @@ export default function BaoCao({ currentUser }) {
 
   useEffect(() => {
     if (!openVatTuModal) return
-    const q = vatTuModalQ.trim().toLowerCase()
+    const q = toSearchable(vatTuModalQ)
     const all = vatTuAllRef.current
     setVatTuResults(q
-      ? all.filter(v => (v.ten_vt || '').toLowerCase().includes(q) || (v.ma_vt || '').toLowerCase().includes(q))
+      ? all.filter(v => toSearchable(v.ten_vt).includes(q) || toSearchable(v.ma_vt).includes(q))
       : all
     )
   }, [vatTuModalQ, openVatTuModal])
@@ -675,8 +676,8 @@ export default function BaoCao({ currentUser }) {
             <div style={{ flex: 1, overflowY: 'auto' }}>
               {khoList
                 .filter(k => !editKhoQ.trim() ||
-                  k.ten_kho.toLowerCase().includes(editKhoQ.toLowerCase()) ||
-                  k.ma_kho.toLowerCase().includes(editKhoQ.toLowerCase()))
+                  toSearchable(k.ten_kho).includes(toSearchable(editKhoQ)) ||
+                  toSearchable(k.ma_kho).includes(toSearchable(editKhoQ)))
                 .map(k => {
                   const selected = form.ma_kho === k.ma_kho
                   return (
@@ -1172,8 +1173,8 @@ export default function BaoCao({ currentUser }) {
         } else if (filterModal === 'thuKho') {
           items = thuKhoList.map(u => ({ id: u.id, label: u.ho_ten }))
         }
-        const q = filterModalQ.toLowerCase()
-        const filtered = q ? items.filter(i => i.label.toLowerCase().includes(q) || (i.code || '').toLowerCase().includes(q)) : items
+        const q = toSearchable(filterModalQ)
+        const filtered = q ? items.filter(i => toSearchable(i.label).includes(q) || toSearchable(i.code).includes(q)) : items
         const toggle = (id) => setFilterModalSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
         return (
           <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
