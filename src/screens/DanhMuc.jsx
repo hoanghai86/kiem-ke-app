@@ -887,7 +887,7 @@ export default function DanhMuc({ inline = false }) {
           <div className="empty-state">Không có dữ liệu</div>
         ) : (
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <table style={{ width: '100%', minWidth: tab === 'ton_kho' ? 560 : undefined, borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', minWidth: tab === 'ton_kho' ? 560 : tab === 'vat_tu' ? 420 : undefined, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
                 <th style={{ padding: '8px 6px', textAlign: 'center', width: 36 }}>
@@ -898,8 +898,8 @@ export default function DanhMuc({ inline = false }) {
                       else setCheckedIds(new Set())
                     }} />
                 </th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: tab === 'ton_kho' ? 90 : undefined }}>Mã</th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: tab === 'ton_kho' ? 160 : undefined }}>Tên</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: tab === 'ton_kho' ? 90 : tab === 'vat_tu' ? 80 : undefined }}>Mã</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: tab === 'ton_kho' ? 160 : tab === 'vat_tu' ? 180 : undefined }}>Tên</th>
                 {(tab === 'vat_tu' || tab === 'ton_kho') && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: 56 }}>ĐVT</th>}
                 {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 90 }}>SL SS</th>}
                 {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 80 }}>Mã kho</th>}
