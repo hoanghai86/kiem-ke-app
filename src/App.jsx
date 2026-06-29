@@ -12,6 +12,7 @@ import Admin from './screens/Admin'
 import DanhMuc from './screens/DanhMuc'
 import Account from './screens/Account'
 import BaoCao from './screens/BaoCao'
+import Import from './screens/Import'
 import Login from './screens/Login'
 import './App.css'
 import './extra.css'
@@ -125,6 +126,7 @@ export default function App() {
         <Route path="/danh-muc" element={user?.role === 'admin' ? <DanhMuc /> : <Navigate to="/" replace />} />
         <Route path="/account" element={user ? <Account currentUser={user} onUpdate={setUser} /> : <Navigate to="/login" replace />} />
         <Route path="/bao-cao" element={user ? <BaoCao currentUser={user} /> : <Navigate to="/login" replace />} />
+        <Route path="/import" element={user ? <Import currentUser={user} /> : <Navigate to="/login" replace />} />
       </Routes>
 
       {user && <SyncButton />}
@@ -313,6 +315,13 @@ function BottomNav({ role }) {
       >
         <span className="nav-icon">📊</span>
         <span>Báo cáo</span>
+      </button>
+      <button
+        className={`nav-item ${path === '/import' ? 'active' : ''}`}
+        onClick={() => navigate('/import')}
+      >
+        <span className="nav-icon">📥</span>
+        <span>Import</span>
       </button>
       {role === 'admin' && (
         <button className={`nav-item ${path === '/admin' ? 'active' : ''}`}

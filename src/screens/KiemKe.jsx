@@ -248,6 +248,7 @@ export default function KiemKe({ currentUser }) {
 
     setSoLuong('')
     setGhiChu('')
+    setHeSo('1')
     setSaving(false)
     setTimeout(() => soLuongRef.current?.focus(), 50)
   }
@@ -970,8 +971,7 @@ export default function KiemKe({ currentUser }) {
             <label className="field-label">Hệ số</label>
             <input type="text" inputMode="decimal" className="input-field" value={heSo}
               onChange={e => setHeSo(e.target.value.replace(/[^\d.]/g, ''))}
-              onFocus={e => e.target.select()}
-              onBlur={e => { const n = parseFloat(e.target.value); if (!isNaN(n) && n > 0) setHeSo(String(n)); else setHeSo('1') }} />
+              onFocus={e => e.target.select()} />
           </div>
         </div>
 
