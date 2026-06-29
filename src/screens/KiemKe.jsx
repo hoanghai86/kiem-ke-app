@@ -212,7 +212,6 @@ export default function KiemKe({ currentUser }) {
         setSoSach(ss)
         if (dvtChinhMap[vt.ma_vt]) setDvt(dvtChinhMap[vt.ma_vt])
       }
-      setHeSo(1)
       setTimeout(() => soLuongRef.current?.focus(), 100)
     } else {
       setDvt('')
