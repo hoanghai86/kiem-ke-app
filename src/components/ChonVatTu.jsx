@@ -216,8 +216,8 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
           {/* Danh sách kết quả — cuộn độc lập */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {showGoiY && list.length > 0 && (
-              <div style={{ padding: '6px 16px 2px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
-                Kiểm gần đây
+              <div style={{ padding: '6px 16px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, background: '#F9FAFB', letterSpacing: 0.5 }}>
+                GẦN ĐÂY
               </div>
             )}
             {list.length === 0 && query.trim() && (
@@ -225,18 +225,23 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
                 Không tìm thấy vật tư
               </div>
             )}
-            {list.map(item => (
-              <div key={item.ma_vt} onClick={() => handleSelect(item)} style={{
-                padding: '11px 16px', borderBottom: '1px solid #F3F4F6',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10
-              }}>
-                <span style={{
-                  background: '#E6F4EF', color: 'var(--green)', borderRadius: 6,
-                  padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0
-                }}>{item.ma_vt}</span>
-                <span style={{ fontSize: 14 }}>{item.ten_vt}</span>
-              </div>
-            ))}
+            {list.map(item => {
+              const isSelected = value?.ma_vt === item.ma_vt
+              return (
+                <div key={item.ma_vt} onClick={() => handleSelect(item)} style={{
+                  padding: '14px 16px', borderBottom: '1px solid #F3F4F6',
+                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                  background: isSelected ? '#F0FDF4' : '#fff'
+                }}>
+                  <span style={{
+                    background: '#E6F4EF', color: 'var(--green)', borderRadius: 6,
+                    padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0
+                  }}>{item.ma_vt}</span>
+                  <span style={{ fontSize: 15, fontWeight: isSelected ? 600 : 400 }}>{item.ten_vt}</span>
+                  {isSelected && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

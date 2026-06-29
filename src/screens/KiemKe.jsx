@@ -43,6 +43,7 @@ export default function KiemKe({ currentUser }) {
   const [openDvtFilter, setOpenDvtFilter] = useState(false)
   const [dvtFilterQ, setDvtFilterQ] = useState('')
   const [dvtFilterSel, setDvtFilterSel] = useState([])
+  const [vtPickerOpen, setVtPickerOpen] = useState(false)
   const [openVtModal, setOpenVtModal] = useState(false)
   const [vtModalQ, setVtModalQ] = useState('')
   const [vtModalSel, setVtModalSel] = useState([])
@@ -61,12 +62,18 @@ export default function KiemKe({ currentUser }) {
   const [openDvtModal, setOpenDvtModal] = useState(false)
   const [dvtQuery, setDvtQuery] = useState('')
   const dvtSearchRef = useRef(null)
+  const [recentDvt, setRecentDvt] = useState([])
 
-  // Persist kho + vatTu sang sessionStorage để nhớ khi quay lại
+  // Persist kho + vatTu + recentDvt sang sessionStorage để nhớ khi quay lại
   useEffect(() => {
     if (!loadedRef.current) return
     if (maKhoHienTai) sessionStorage.setItem(`kiem_ke_kho_${phienId}`, maKhoHienTai)
   }, [maKhoHienTai, phienId])
+
+  useEffect(() => {
+    if (!loadedRef.current) return
+    sessionStorage.setItem(`kiem_ke_dvt_recent_${phienId}`, JSON.stringify(recentDvt))
+  }, [recentDvt, phienId])
 
   useEffect(() => {
     if (!loadedRef.current) return
@@ -145,6 +152,9 @@ export default function KiemKe({ currentUser }) {
       if (lastLuot) setLuotKiem(lastLuot.luot_kiem)
 
       // Restore kho + vật tư đã chọn lần trước
+      const savedRecentDvt = sessionStorage.getItem(`kiem_ke_dvt_recent_${phienId}`)
+      if (savedRecentDvt) try { setRecentDvt(JSON.parse(savedRecentDvt)) } catch {}
+
       const savedKho = sessionStorage.getItem(`kiem_ke_kho_${phienId}`)
       if (savedKho && khos.some(k => k.ma_kho === savedKho)) {
         setMaKhoHienTai(savedKho)
@@ -777,7 +787,6 @@ export default function KiemKe({ currentUser }) {
 
         {/* Kho đang kiểm + Đếm lại — cùng hàng */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-
           <div onClick={() => { setOpenKhoModal(true); setTimeout(() => khoSearchRef.current?.focus(), 100) }}
             style={{
               flex: 1, padding: '0 12px', border: '1.5px solid var(--border)',
@@ -845,19 +854,22 @@ export default function KiemKe({ currentUser }) {
         )}
 
         {/* Chọn mã vật tư */}
-        {vatTuCoDinh ? (
-          <div className="autofill-chip">
+        {vatTuCoDinh && !vtPickerOpen ? (
+          <div className="autofill-chip" onClick={() => setVtPickerOpen(true)}
+            style={{ cursor: 'pointer' }}>
             <div style={{ flex: 1 }}>
               <div className="chip-name">{vatTuCoDinh.ma_vt} · {vatTuCoDinh.ten_vt}</div>
-              <div className="chip-meta">Đang đếm mã này</div>
+              <div className="chip-meta">Chạm để đổi mã</div>
             </div>
-            <button className="chip-change" onClick={() => { setAutoOpenVt(true); handleChonVatTuCoDinh(null) }}>
-              Đổi mã
-            </button>
+            <span style={{ color: 'var(--green)', fontSize: 13, fontWeight: 600, flexShrink: 0 }}>Đổi ›</span>
           </div>
         ) : (
-          <ChonVatTu value={null} autoOpen={autoOpenVt}
-            onSelect={vt => { setAutoOpenVt(false); handleChonVatTuCoDinh(vt) }} />
+          <ChonVatTu value={null} autoOpen={vtPickerOpen || autoOpenVt}
+            onSelect={vt => {
+              setAutoOpenVt(false)
+              setVtPickerOpen(false)
+              if (vt) handleChonVatTuCoDinh(vt)
+            }} />
         )}
 
         {/* Hàng 1: Số lượng + ĐVT + Hệ số */}
@@ -919,10 +931,16 @@ export default function KiemKe({ currentUser }) {
                 }}>Hủy</button>
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
-                {danhMucDvt
-                  .filter(d => !dvtQuery.trim() || toSearchable(d.ten_dvt).includes(toSearchable(dvtQuery)) || toSearchable(d.ma_dvt).includes(toSearchable(dvtQuery)))
-                  .map(d => (
-                    <div key={d.ma_dvt} onClick={() => { setDvt(d.ma_dvt); setOpenDvtModal(false); setDvtQuery('') }} style={{
+                {(() => {
+                  const q = dvtQuery.trim()
+                  const selectDvt = (ma) => {
+                    setDvt(ma)
+                    setRecentDvt(prev => [ma, ...prev.filter(x => x !== ma)].slice(0, 8))
+                    setOpenDvtModal(false)
+                    setDvtQuery('')
+                  }
+                  const renderRow = (d) => (
+                    <div key={d.ma_dvt} onClick={() => selectDvt(d.ma_dvt)} style={{
                       padding: '14px 16px', borderBottom: '1px solid #F3F4F6',
                       cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
                       background: d.ma_dvt === dvt ? '#F0FDF4' : '#fff'
@@ -934,8 +952,24 @@ export default function KiemKe({ currentUser }) {
                       <span style={{ fontSize: 15, fontWeight: d.ma_dvt === dvt ? 600 : 400 }}>{d.ten_dvt}</span>
                       {d.ma_dvt === dvt && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
                     </div>
-                  ))
-                }
+                  )
+                  if (q) {
+                    return danhMucDvt
+                      .filter(d => toSearchable(d.ten_dvt).includes(toSearchable(q)) || toSearchable(d.ma_dvt).includes(toSearchable(q)))
+                      .map(renderRow)
+                  }
+                  const recentItems = recentDvt.map(ma => danhMucDvt.find(d => d.ma_dvt === ma)).filter(Boolean)
+                  const recentSet = new Set(recentDvt)
+                  const restItems = danhMucDvt.filter(d => !recentSet.has(d.ma_dvt))
+                  return <>
+                    {recentItems.length > 0 && <>
+                      <div style={{ padding: '6px 16px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', background: '#F9FAFB', letterSpacing: 0.5 }}>GẦN ĐÂY</div>
+                      {recentItems.map(renderRow)}
+                      <div style={{ padding: '6px 16px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', background: '#F9FAFB', letterSpacing: 0.5 }}>TẤT CẢ</div>
+                    </>}
+                    {restItems.map(renderRow)}
+                  </>
+                })()}
               </div>
             </div>
           )}
@@ -946,7 +980,7 @@ export default function KiemKe({ currentUser }) {
           </div>
         </div>
 
-        {/* Hàng 2: Quy đổi + Lượt kiểm + Chênh lệch */}
+        {/* Hàng 2: Quy đổi + Lượt + Info kho */}
         <div style={{ display: 'flex', gap: 8 }}>
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Quy đổi</label>
@@ -955,15 +989,27 @@ export default function KiemKe({ currentUser }) {
             </div>
           </div>
           <div className="field-group" style={{ flex: 1 }}>
-            <label className="field-label">Lượt kiểm</label>
+            <label className="field-label">Lượt</label>
             <input type="number" className="input-field" value={luotKiem}
               onChange={e => setLuotKiem(parseInt(e.target.value))} min="1" />
           </div>
           <div className="field-group" style={{ flex: 1 }}>
-            <label className="field-label">Chênh lệch</label>
-            <div className={`input-readonly ${!chenhLech ? '' : parseFloat(chenhLech) < 0 ? 'text-danger' : parseFloat(chenhLech) > 0 ? 'text-warn' : 'text-ok'}`}>
-              {chenhLech !== null ? (parseFloat(chenhLech) > 0 ? '+' : '') + fmtSL(chenhLech) : '—'}
-            </div>
+            <label className="field-label">Theo kho</label>
+            {vatTuCoDinh && maKhoHienTai ? (() => {
+              const tongThucTe = danhSach
+                .filter(r => r.ma_vt === vatTuCoDinh.ma_vt && r.ma_kho === maKhoHienTai)
+                .reduce((s, r) => s + (r.so_luong_quy_doi ?? (parseFloat(r.so_luong_thuc_te) * (r.he_so_quy_doi || 1))), 0)
+              const lech = soSach !== null ? tongThucTe - soSach : null
+              return (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', height: 40, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+                  <span>SS: <b style={{ color: 'var(--text)' }}>{soSach !== null ? fmtSL(soSach) : '—'}</b></span>
+                  <span>Kiểm: <b style={{ color: '#2563EB' }}>{fmtSL(tongThucTe)}</b></span>
+                  <span>Lệch: <b style={{ color: lech === null ? 'var(--text)' : lech < 0 ? '#EF4444' : lech > 0 ? '#D97706' : '#1d9e75' }}>
+                    {lech !== null ? (lech > 0 ? '+' : '') + fmtSL(lech) : '—'}
+                  </b></span>
+                </div>
+              )
+            })() : <div style={{ height: 40, display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>—</div>}
           </div>
         </div>
 
