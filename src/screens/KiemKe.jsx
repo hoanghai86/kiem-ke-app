@@ -995,7 +995,21 @@ export default function KiemKe({ currentUser }) {
               const lech = soSach !== null ? tongThucTe - soSach : null
               return (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', height: 40, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
-                  <span>SS: <b style={{ color: 'var(--text)' }}>{soSach !== null ? fmtSL(soSach) : '—'}</b></span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    SS: <b style={{ color: 'var(--text)' }}>{soSach !== null ? fmtSL(soSach) : '—'}</b>
+                    {soSach !== null && (
+                      <button onClick={() => {
+                        const sl = soSach / (parseFloat(heSo) || 1)
+                        setSoLuong(fmtSL(sl))
+                        setTimeout(() => soLuongRef.current?.focus(), 50)
+                      }} style={{
+                        border: '1px solid var(--green)', borderRadius: 4,
+                        background: 'var(--green-light)', color: 'var(--green)',
+                        fontSize: 9, padding: '1px 4px', cursor: 'pointer',
+                        fontWeight: 700, lineHeight: 1.3, flexShrink: 0
+                      }}>Điền</button>
+                    )}
+                  </span>
                   <span>Kiểm: <b style={{ color: '#2563EB' }}>{fmtSL(tongThucTe)}</b></span>
                   <span>Lệch: <b style={{ color: lech === null ? 'var(--text)' : lech < 0 ? '#EF4444' : lech > 0 ? '#D97706' : '#1d9e75' }}>
                     {lech !== null ? (lech > 0 ? '+' : '') + fmtSL(lech) : '—'}
