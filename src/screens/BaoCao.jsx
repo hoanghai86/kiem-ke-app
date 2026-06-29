@@ -17,7 +17,7 @@ const TABS = [
 
 function buildExcelWorkbook(rows, cols) {
   const header = cols.map(c => c.label)
-  const data = rows.map((r, i) => cols.map(c => c.get(r, i) ?? ''))
+  const data = rows.map((r, i) => cols.map(c => (c.excel ? c.excel(r, i) : c.get(r, i)) ?? ''))
   const ws = XLSX.utils.aoa_to_sheet([header, ...data])
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
@@ -107,10 +107,10 @@ export default function BaoCao({ currentUser }) {
     { label: 'Stt',        get: (r, i) => i + 1 },
     { label: 'Mã VT',      get: r => r.ma_vt },
     { label: 'Tên VT',     get: r => r.ten_vt },
-    { label: 'SL thực tế', get: r => fmtSL(r.so_luong_thuc_te) },
+    { label: 'SL thực tế', get: r => fmtSL(r.so_luong_thuc_te), excel: r => r.so_luong_thuc_te ?? '' },
     { label: 'ĐVT phụ',    get: r => r.ma_dvt_kiem || '' },
-    { label: '× Hệ số',    get: r => fmtSL(r.he_so_quy_doi ?? 1) },
-    { label: 'SL quy đổi', get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '' },
+    { label: '× Hệ số',    get: r => fmtSL(r.he_so_quy_doi ?? 1), excel: r => r.he_so_quy_doi ?? 1 },
+    { label: 'SL quy đổi', get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '', excel: r => r.so_luong_quy_doi ?? '' },
     { label: 'ĐVT chính',  get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
     { label: 'Ghi chú',    get: r => r.ghi_chu || '' },
     { label: 'Kho',        get: r => r.dm_kho?.ten_kho || r.ma_kho || r.phien_kiem_ke?.dm_kho?.ten_kho || r.phien_kiem_ke?.ma_kho || '' },
@@ -124,7 +124,7 @@ export default function BaoCao({ currentUser }) {
     { label: 'Mã VT',      get: r => r.ma_vt },
     { label: 'Tên VT',     get: r => vtNameMap[r.ma_vt] || '' },
     { label: 'ĐVT chính',  get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
-    { label: 'SL sổ sách', get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '' },
+    { label: 'SL sổ sách', get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '', excel: r => r.so_luong_so_sach ?? '' },
     { label: 'Kho',        get: r => khoList.find(k => k.ma_kho === r.ma_kho)?.ten_kho || r.ma_kho || '' },
   ]
 
@@ -133,13 +133,24 @@ export default function BaoCao({ currentUser }) {
     { label: 'Mã VT',            get: r => r.ma_vt },
     { label: 'Tên vật tư',       get: r => r.ten_vt },
     { label: 'ĐVT chính',        get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
-    { label: 'SL quy đổi',       get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '' },
-    { label: 'SL sổ sách',       get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '' },
-    { label: 'Lệch KT-SS/TK-SS', get: r => r.chenh_lech != null ? fmtSL(r.chenh_lech) : '' },
+    { label: 'SL quy đổi',       get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '', excel: r => r.so_luong_quy_doi ?? '' },
+    { label: 'SL sổ sách',       get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '', excel: r => r.so_luong_so_sach ?? '' },
+    { label: 'Lệch KT-SS/TK-SS', get: r => r.chenh_lech != null ? fmtSL(r.chenh_lech) : '', excel: r => r.chenh_lech ?? '' },
     { label: 'Ghi chú',          get: r => r.ghi_chu || '' },
   ]
 
   useEffect(() => {
+    // vtNameMap luôn lấy từ IndexedDB (đã sync đầy đủ qua fetchAllVatTu có phân trang)
+    db.dm_vat_tu.toArray().then(vts => {
+      const mapDvt = {}, mapName = {}
+      vts.forEach(v => {
+        if (v.ma_dvt_chinh) mapDvt[v.ma_vt] = v.ma_dvt_chinh
+        mapName[v.ma_vt] = v.ten_vt || ''
+      })
+      setVtDvtChinhMap(mapDvt)
+      setVtNameMap(mapName)
+    })
+
     if (navigator.onLine) {
       supabase.from('dm_kho').select('ma_kho,ten_kho').eq('active', true).order('ma_kho')
         .then(({ data }) => setKhoList(data || []))
@@ -156,23 +167,12 @@ export default function BaoCao({ currentUser }) {
           setDvtMap(map)
           setDanhMucDvt(data || [])
         })
-      supabase.from('dm_vat_tu').select('ma_vt,ten_vt,ma_dvt_chinh')
-        .then(({ data }) => {
-          const mapDvt = {}, mapName = {}
-          ;(data || []).forEach(v => {
-            if (v.ma_dvt_chinh) mapDvt[v.ma_vt] = v.ma_dvt_chinh
-            mapName[v.ma_vt] = v.ten_vt || ''
-          })
-          setVtDvtChinhMap(mapDvt)
-          setVtNameMap(mapName)
-        })
     } else {
       Promise.all([
         db.dm_kho.toArray(),
         db.dm_user.toArray(),
         db.dm_dvt.toArray(),
-        db.dm_vat_tu.toArray(),
-      ]).then(([khos, users, dvts, vts]) => {
+      ]).then(([khos, users, dvts]) => {
         setKhoList(khos)
         const uMap = {}
         users.forEach(u => { uMap[u.id] = u })
@@ -181,13 +181,6 @@ export default function BaoCao({ currentUser }) {
         dvts.forEach(d => { dMap[d.ma_dvt] = d.ten_dvt })
         setDvtMap(dMap)
         setDanhMucDvt(dvts)
-        const mapDvt = {}, mapName = {}
-        vts.forEach(v => {
-          if (v.ma_dvt_chinh) mapDvt[v.ma_vt] = v.ma_dvt_chinh
-          mapName[v.ma_vt] = v.ten_vt || ''
-        })
-        setVtDvtChinhMap(mapDvt)
-        setVtNameMap(mapName)
       })
     }
   }, [])
