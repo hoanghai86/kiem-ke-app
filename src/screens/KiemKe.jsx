@@ -776,7 +776,7 @@ export default function KiemKe({ currentUser }) {
 
         {/* Kho đang kiểm + Đếm lại — cùng hàng */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-          <label className="field-label" style={{ flexShrink: 0, marginBottom: 0 }}>Kho đang kiểm</label>
+
           <div onClick={() => { setOpenKhoModal(true); setTimeout(() => khoSearchRef.current?.focus(), 100) }}
             style={{
               flex: 1, padding: '0 12px', border: '1.5px solid var(--border)',

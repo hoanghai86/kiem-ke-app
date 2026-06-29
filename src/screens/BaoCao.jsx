@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import * as XLSX from 'xlsx'
 import { supabase } from '../lib/supabase'
 import { db, updateChiTiet, deleteChiTiet, getSoSach } from '../lib/db'
 import { pushOfflineQueue } from '../lib/sync'
@@ -13,30 +14,24 @@ const TABS = [
   { key: 'ngoai_so_sach', label: 'Ngoài SS' },
 ]
 
-function buildCSVBlob(rows, cols, filename) {
-  const header = cols.map(c => c.label).join(',')
-  const body = rows.map((r, i) =>
-    cols.map(c => {
-      const v = String(c.get(r, i) ?? '')
-      return v.includes(',') || v.includes('"') || v.includes('\n')
-        ? `"${v.replace(/"/g, '""')}"` : v
-    }).join(',')
-  ).join('\n')
-  const blob = new Blob(['﻿' + header + '\n' + body], { type: 'text/csv;charset=utf-8' })
-  return { blob, file: new File([blob], filename, { type: 'text/csv' }) }
+function buildExcelWorkbook(rows, cols) {
+  const header = cols.map(c => c.label)
+  const data = rows.map((r, i) => cols.map(c => c.get(r, i) ?? ''))
+  const ws = XLSX.utils.aoa_to_sheet([header, ...data])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+  return wb
 }
 
-function exportCSV(rows, cols, filename) {
-  const { blob } = buildCSVBlob(rows, cols, filename)
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename
-  document.body.appendChild(a); a.click()
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url) }, 1000)
+function exportExcel(rows, cols, filename) {
+  const wb = buildExcelWorkbook(rows, cols)
+  XLSX.writeFile(wb, filename)
 }
 
-async function shareCSV(rows, cols, filename) {
-  const { file } = buildCSVBlob(rows, cols, filename)
+async function shareExcel(rows, cols, filename) {
+  const wb = buildExcelWorkbook(rows, cols)
+  const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
+  const file = new File([wbout], filename, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
   if (!navigator.share) { alert('Trình duyệt không hỗ trợ chia sẻ file'); return }
   try {
     await navigator.share({ files: [file], title: filename })
@@ -707,7 +702,7 @@ export default function BaoCao({ currentUser }) {
 
   // ── List / report render ─────────────────────────────────────────
   const cols     = tab === 'kiem_ke' ? colKiemKe : colThuaThieu
-  const filename = `${tab === 'kiem_ke' ? 'KiemKe' : tab === 'thua_thieu' ? 'ThuaThieu' : 'SoSanh'}_${f.tuNgay}_${f.denNgay}.csv`
+  const filename = `${tab === 'kiem_ke' ? 'KiemKe' : tab === 'thua_thieu' ? 'ThuaThieu' : 'SoSanh'}_${f.tuNgay}_${f.denNgay}.xlsx`
   const keToanList   = Object.values(userMap).filter(u => u.role === 'ke_toan')
   const thuKhoList   = Object.values(userMap).filter(u => u.role === 'thu_kho')
 
@@ -771,8 +766,8 @@ export default function BaoCao({ currentUser }) {
         {tab !== 'ngoai_so_sach' && (() => {
           const linkStyle = { border: 'none', background: 'none', fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap', color: 'var(--green)', fontWeight: 600 }
           if (tab === 'ton_kho') return <>
-            <button style={linkStyle} disabled={!displayTonKho.length} onClick={() => exportCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}>⬇ CSV</button>
-            <button style={linkStyle} disabled={!displayTonKho.length} onClick={() => shareCSV(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.csv`)}>⬆ Chia sẻ</button>
+            <button style={linkStyle} disabled={!displayTonKho.length} onClick={() => exportExcel(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.xlsx`)}>⬇ Excel</button>
+            <button style={linkStyle} disabled={!displayTonKho.length} onClick={() => shareExcel(displayTonKho, colTonKho, `TonKhoSoSach_${f.kho.length > 0 ? f.kho.join('-') : 'TatCaKho'}.xlsx`)}>⬆ Chia sẻ</button>
           </>
           if (tab === 'so_sanh') {
             const colSS = [
@@ -785,13 +780,13 @@ export default function BaoCao({ currentUser }) {
               { label: 'Lệch KT-TK', get: r => r.sl_kt !== null && r.sl_tk !== null ? (r.sl_kt - r.sl_tk) : '' },
             ]
             return <>
-              <button style={linkStyle} disabled={!soSanhRows.length} onClick={() => exportCSV(soSanhRows, colSS, 'SoSanhKTTK.csv')}>⬇ CSV</button>
-              <button style={linkStyle} disabled={!soSanhRows.length} onClick={() => shareCSV(soSanhRows, colSS, 'SoSanhKTTK.csv')}>⬆ Chia sẻ</button>
+              <button style={linkStyle} disabled={!soSanhRows.length} onClick={() => exportExcel(soSanhRows, colSS, 'SoSanhKTTK.xlsx')}>⬇ Excel</button>
+              <button style={linkStyle} disabled={!soSanhRows.length} onClick={() => shareExcel(soSanhRows, colSS, 'SoSanhKTTK.xlsx')}>⬆ Chia sẻ</button>
             </>
           }
           return <>
-            <button style={linkStyle} disabled={!displayDataFinal.length} onClick={() => exportCSV(displayDataFinal, cols, filename)}>⬇ CSV</button>
-            <button style={linkStyle} disabled={!displayDataFinal.length} onClick={() => shareCSV(displayDataFinal, cols, filename)}>⬆ Chia sẻ</button>
+            <button style={linkStyle} disabled={!displayDataFinal.length} onClick={() => exportExcel(displayDataFinal, cols, filename)}>⬇ Excel</button>
+            <button style={linkStyle} disabled={!displayDataFinal.length} onClick={() => shareExcel(displayDataFinal, cols, filename)}>⬆ Chia sẻ</button>
           </>
         })()}
         <span style={{ flex: 1 }} />
