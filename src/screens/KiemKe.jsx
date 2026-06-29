@@ -102,17 +102,10 @@ export default function KiemKe({ currentUser }) {
       setTenDoiTac(doiTac?.ho_ten || '')
       setDanhMucDvt(dvtList)
 
-      // Fetch dm_vat_tu để lấy ma_dvt_chinh — ưu tiên Supabase nếu online
-      let localDvtMap = {}
-      if (navigator.onLine) {
-        const { data } = await supabase.from('dm_vat_tu').select('ma_vt, ma_dvt_chinh').eq('active', true)
-        if (data?.length) {
-          data.forEach(v => { if (v.ma_dvt_chinh) localDvtMap[v.ma_vt] = v.ma_dvt_chinh })
-        }
-      } else {
-        const vtList = await db.dm_vat_tu.toArray()
-        vtList.forEach(v => { if (v.ma_dvt_chinh) localDvtMap[v.ma_vt] = v.ma_dvt_chinh })
-      }
+      // Dùng IndexedDB cho dvtChinhMap (đã sync đầy đủ qua pullDanhMuc có phân trang)
+      const vtList = await db.dm_vat_tu.toArray()
+      const localDvtMap = {}
+      vtList.forEach(v => { if (v.ma_dvt_chinh) localDvtMap[v.ma_vt] = v.ma_dvt_chinh })
       setDvtChinhMap(localDvtMap)
 
       // Pull chitiet từ Supabase (hỗ trợ tab mới / ẩn danh / thiết bị khác)
