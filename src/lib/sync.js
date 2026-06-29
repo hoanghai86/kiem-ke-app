@@ -185,8 +185,10 @@ export function subscribeVatTuRealtime() {
     })
     .subscribe()
   return () => {
-    supabase.removeChannel(_danhMucChannel)
-    _danhMucChannel = null
+    if (_danhMucChannel) {
+      supabase.removeChannel(_danhMucChannel)
+      _danhMucChannel = null
+    }
   }
 }
 
