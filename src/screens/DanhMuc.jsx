@@ -29,6 +29,7 @@ export default function DanhMuc({ inline = false }) {
   const [showForm, setShowForm] = useState(false)
   const [editItem, setEditItem] = useState(null)
   const [maEditable, setMaEditable] = useState(false)
+  const [viewOnly, setViewOnly] = useState(false)
   const [form, setForm]         = useState(EMPTY.kho)
   const [saving, setSaving]     = useState(false)
   const [err, setErr]           = useState('')
@@ -135,8 +136,9 @@ export default function DanhMuc({ inline = false }) {
     setShowForm(true)
   }
 
-  async function openEdit(item) {
+  async function openEdit(item, isViewOnly = false) {
     setEditItem(item)
+    setViewOnly(isViewOnly)
     if (tab === 'kho')     setForm({ ma_kho: item.ma_kho, ten_kho: item.ten_kho, active: item.active })
     if (tab === 'dvt')     setForm({ ma_dvt: item.ma_dvt, ten_dvt: item.ten_dvt, active: item.active })
     if (tab === 'vat_tu')  setForm({ ma_vt: item.ma_vt, ten_vt: item.ten_vt, ma_dvt_chinh: item.ma_dvt_chinh || '', active: item.active })
@@ -152,6 +154,7 @@ export default function DanhMuc({ inline = false }) {
     setShowForm(false)
     setEditItem(null)
     setErr('')
+    setViewOnly(false)
   }
 
   function setF(key, val) { setForm(f => ({ ...f, [key]: val })) }
@@ -546,13 +549,13 @@ export default function DanhMuc({ inline = false }) {
       <div className={inline ? undefined : 'screen'}>
         {!inline && (
           <div className="topbar">
-            <div className="topbar-title">{editItem ? 'Sửa' : 'Thêm'} {titleMap[tab]}</div>
-            <div className="topbar-sub">{editItem ? 'Chỉnh sửa thông tin' : 'Tạo mới'}</div>
+            <div className="topbar-title">{viewOnly ? 'Xem' : editItem ? 'Sửa' : 'Thêm'} {titleMap[tab]}</div>
+            <div className="topbar-sub">{viewOnly ? 'Chi tiết' : editItem ? 'Chỉnh sửa thông tin' : 'Tạo mới'}</div>
           </div>
         )}
         {inline && (
           <div style={{ fontWeight: 600, fontSize: 15, padding: '12px 0 8px' }}>
-            {editItem ? 'Sửa' : 'Thêm'} {titleMap[tab]}
+            {viewOnly ? 'Xem' : editItem ? 'Sửa' : 'Thêm'} {titleMap[tab]}
           </div>
         )}
         <div className="content">
@@ -617,40 +620,59 @@ export default function DanhMuc({ inline = false }) {
           </>}
 
           {tab === 'ton_kho' && <>
-            <div className="field-group">
-              <label className="field-label">Vật tư *</label>
-              <div className="input-select" onClick={() => { setVtModalQ(''); setOpenVtModal(true) }}
-                style={{ cursor: 'pointer', color: form.ma_vt ? 'var(--text)' : 'var(--text-muted)' }}>
-                {form.ma_vt ? `${form.ma_vt} – ${form.ten_vt}` : '-- Chọn vật tư --'}
+            {viewOnly ? (
+              <div style={{ background: 'var(--surface)', borderRadius: 10, marginBottom: 16, overflow: 'hidden' }}>
+                {[
+                  { label: 'Mã vật tư', value: form.ma_vt, bold: true, color: '#1d9e75' },
+                  { label: 'Tên vật tư', value: form.ten_vt },
+                  { label: 'Kho', value: `${form.ma_kho}${khoList.find(k => k.ma_kho === form.ma_kho)?.ten_kho ? ' – ' + khoList.find(k => k.ma_kho === form.ma_kho).ten_kho : ''}` },
+                  { label: 'Đơn vị tính', value: form.ma_dvt || '—' },
+                  { label: 'SL sổ sách', value: Number(form.so_luong_so_sach ?? 0).toLocaleString('en-US', { maximumFractionDigits: 3 }), bold: true },
+                ].map(({ label, value, bold, color }, i, arr) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 13, flexShrink: 0, marginRight: 12 }}>{label}</span>
+                    <span style={{ fontSize: 13, fontWeight: bold ? 600 : 400, color: color || 'var(--text)', textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+                  </div>
+                ))}
               </div>
-            </div>
-            <div className="field-group">
-              <label className="field-label">Kho *</label>
-              <div className="input-select" onClick={() => { setKhoModalQ(''); setOpenKhoModal(true) }}
-                style={{ cursor: 'pointer', color: form.ma_kho ? 'var(--text)' : 'var(--text-muted)' }}>
-                {form.ma_kho
-                  ? `${form.ma_kho} – ${khoList.find(k => k.ma_kho === form.ma_kho)?.ten_kho || ''}`
-                  : '-- Chọn kho --'}
-              </div>
-            </div>
-            <div className="row-2col">
-              <div className="field-group">
-                <label className="field-label">Đơn vị tính</label>
-                <select className="input-select" value={form.ma_dvt}
-                  onChange={e => setF('ma_dvt', e.target.value)}>
-                  <option value="">-- Chọn --</option>
-                  {dvtOptions.map(d => (
-                    <option key={d.ma_dvt} value={d.ma_dvt}>{d.ma_dvt}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="field-group">
-                <label className="field-label">SL sổ sách</label>
-                <input type="number" className="input-field" value={form.so_luong_so_sach}
-                  onChange={e => setF('so_luong_so_sach', e.target.value)}
-                  min="0" step="any" placeholder="0" />
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="field-group">
+                  <label className="field-label">Vật tư *</label>
+                  <div className="input-select" onClick={() => { setVtModalQ(''); setOpenVtModal(true) }}
+                    style={{ cursor: 'pointer', color: form.ma_vt ? 'var(--text)' : 'var(--text-muted)' }}>
+                    {form.ma_vt ? `${form.ma_vt} – ${form.ten_vt}` : '-- Chọn vật tư --'}
+                  </div>
+                </div>
+                <div className="field-group">
+                  <label className="field-label">Kho *</label>
+                  <div className="input-select" onClick={() => { setKhoModalQ(''); setOpenKhoModal(true) }}
+                    style={{ cursor: 'pointer', color: form.ma_kho ? 'var(--text)' : 'var(--text-muted)' }}>
+                    {form.ma_kho
+                      ? `${form.ma_kho} – ${khoList.find(k => k.ma_kho === form.ma_kho)?.ten_kho || ''}`
+                      : '-- Chọn kho --'}
+                  </div>
+                </div>
+                <div className="row-2col">
+                  <div className="field-group">
+                    <label className="field-label">Đơn vị tính</label>
+                    <select className="input-select" value={form.ma_dvt}
+                      onChange={e => setF('ma_dvt', e.target.value)}>
+                      <option value="">-- Chọn --</option>
+                      {dvtOptions.map(d => (
+                        <option key={d.ma_dvt} value={d.ma_dvt}>{d.ma_dvt}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field-group">
+                    <label className="field-label">SL sổ sách</label>
+                    <input type="number" className="input-field" value={form.so_luong_so_sach}
+                      onChange={e => setF('so_luong_so_sach', e.target.value)}
+                      min="0" step="any" placeholder="0" />
+                  </div>
+                </div>
+              </>
+            )}
           </>}
 
           {tab !== 'ton_kho' && (
@@ -664,10 +686,19 @@ export default function DanhMuc({ inline = false }) {
           )}
 
           <div className="row-2col" style={{ marginTop: 8 }}>
-            <button className="btn-secondary" onClick={closeForm} disabled={saving}>Hủy</button>
-            <button className="btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? 'Đang lưu...' : editItem ? 'Lưu thay đổi' : 'Tạo mới'}
-            </button>
+            {viewOnly ? (
+              <>
+                <button className="btn-secondary" onClick={closeForm}>Đóng</button>
+                <button className="btn-primary" onClick={() => setViewOnly(false)}>Sửa</button>
+              </>
+            ) : (
+              <>
+                <button className="btn-secondary" onClick={closeForm} disabled={saving}>Hủy</button>
+                <button className="btn-primary" onClick={handleSave} disabled={saving}>
+                  {saving ? 'Đang lưu...' : editItem ? 'Lưu thay đổi' : 'Tạo mới'}
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -886,11 +917,18 @@ export default function DanhMuc({ inline = false }) {
         ) : filtered.length === 0 ? (
           <div className="empty-state">Không có dữ liệu</div>
         ) : (
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <table style={{ width: '100%', minWidth: tab === 'ton_kho' ? 560 : tab === 'vat_tu' ? 420 : undefined, borderCollapse: 'collapse', fontSize: 13 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: 32 }} />
+              <col style={{ width: tab === 'ton_kho' ? 72 : 76 }} />
+              <col />
+              {(tab === 'vat_tu' || tab === 'ton_kho') && <col style={{ width: 40 }} />}
+              {tab === 'ton_kho' && <col style={{ width: 68 }} />}
+              {tab !== 'ton_kho' && <col style={{ width: 44 }} />}
+            </colgroup>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                <th style={{ padding: '8px 6px', textAlign: 'center', width: 36 }}>
+                <th style={{ padding: '8px 4px', textAlign: 'center' }}>
                   <input type="checkbox"
                     checked={filtered.length > 0 && filtered.every(r => checkedIds.has(r.id))}
                     onChange={e => {
@@ -898,12 +936,11 @@ export default function DanhMuc({ inline = false }) {
                       else setCheckedIds(new Set())
                     }} />
                 </th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: tab === 'ton_kho' ? 90 : tab === 'vat_tu' ? 80 : undefined }}>Mã</th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: tab === 'ton_kho' ? 160 : tab === 'vat_tu' ? 180 : undefined }}>Tên</th>
-                {(tab === 'vat_tu' || tab === 'ton_kho') && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: 56 }}>ĐVT</th>}
-                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 90 }}>SL SS</th>}
-                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 80 }}>Mã kho</th>}
-                {tab !== 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>}
+                <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Mã</th>
+                <th style={{ padding: '8px 6px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Tên</th>
+                {(tab === 'vat_tu' || tab === 'ton_kho') && <th style={{ padding: '8px 4px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>ĐVT</th>}
+                {tab === 'ton_kho' && <th style={{ padding: '8px 4px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>SL SS</th>}
+                {tab !== 'ton_kho' && <th style={{ padding: '8px 4px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>}
               </tr>
             </thead>
             <tbody>
@@ -911,14 +948,14 @@ export default function DanhMuc({ inline = false }) {
                 const id      = item.id
                 const ma      = tab === 'kho' ? item.ma_kho : tab === 'dvt' ? item.ma_dvt : item.ma_vt
                 const name    = tab === 'kho' ? item.ten_kho : tab === 'dvt' ? item.ten_dvt : item.ten_vt
-                const colSpan = tab === 'ton_kho' ? 6 : tab === 'vat_tu' ? 5 : 4
+                const colSpan = tab === 'ton_kho' ? 5 : tab === 'vat_tu' ? 5 : 4
                 const isSel   = selectedId === id
                 const isChk   = checkedIds.has(id)
                 return (
                   <>
                     <tr key={id} onClick={() => { setSelectedId(isSel ? null : id); setDeletingId(null) }}
                       style={{ cursor: 'pointer', opacity: tab === 'ton_kho' || item.active ? 1 : 0.55, background: isSel ? '#F0FDF4' : isChk ? '#FAFFF5' : 'white', borderBottom: '1px solid #F3F4F6' }}>
-                      <td style={{ padding: '10px 6px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                      <td style={{ padding: '10px 4px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={isChk}
                           onChange={e => {
                             setCheckedIds(prev => {
@@ -928,15 +965,17 @@ export default function DanhMuc({ inline = false }) {
                             })
                           }} />
                       </td>
-                      <td style={{ padding: '10px 10px', fontWeight: 700, color: '#1d9e75', whiteSpace: 'nowrap' }}>{ma}</td>
-                      <td style={{ padding: '10px 10px' }}>{name}</td>
-                      {tab === 'vat_tu' && <td style={{ padding: '10px 10px', color: 'var(--text-muted)' }}>{item.ma_dvt_chinh || '—'}</td>}
-                      {tab === 'ton_kho' && <td style={{ padding: '10px 10px', color: 'var(--text-muted)' }}>{item.ma_dvt || '—'}</td>}
-                      {tab === 'ton_kho' && <td style={{ padding: '10px 10px', textAlign: 'right', fontWeight: 600 }}>{Number(item.so_luong_so_sach ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</td>}
-                      {tab === 'ton_kho' && <td style={{ padding: '10px 10px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{item.ma_kho}</td>}
+                      <td style={{ padding: '10px 6px', fontWeight: 700, color: '#1d9e75', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ma}</td>
+                      <td style={{ padding: '10px 6px', wordBreak: 'break-word' }}>
+                        {name}
+                        {tab === 'ton_kho' && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Kho: {item.ma_kho}</div>}
+                      </td>
+                      {tab === 'vat_tu' && <td style={{ padding: '10px 4px', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.ma_dvt_chinh || '—'}</td>}
+                      {tab === 'ton_kho' && <td style={{ padding: '10px 4px', textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.ma_dvt || '—'}</td>}
+                      {tab === 'ton_kho' && <td style={{ padding: '10px 4px', textAlign: 'right', fontWeight: 600, fontSize: 12 }}>{Number(item.so_luong_so_sach ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</td>}
                       {tab !== 'ton_kho' && (
-                        <td style={{ padding: '10px 10px', textAlign: 'center' }}>
-                          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
+                        <td style={{ padding: '10px 4px', textAlign: 'center' }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 4px', borderRadius: 4,
                             background: item.active ? '#D1FAE5' : '#F3F4F6', color: item.active ? '#065F46' : '#6B7280' }}>
                             {item.active ? 'HĐ' : 'Ẩn'}
                           </span>
@@ -960,6 +999,12 @@ export default function DanhMuc({ inline = false }) {
                             </div>
                           ) : (
                             <div style={{ display: 'flex', gap: 16, justifyContent: 'flex-end' }}>
+                              {tab === 'ton_kho' && (
+                                <button onClick={e => { e.stopPropagation(); openEdit(item, true) }}
+                                  style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#1d9e75', cursor: 'pointer', padding: '4px 0' }}>
+                                  Xem
+                                </button>
+                              )}
                               <button onClick={e => { e.stopPropagation(); openEdit(item) }}
                                 style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', padding: '4px 0' }}>
                                 Sửa
@@ -984,7 +1029,6 @@ export default function DanhMuc({ inline = false }) {
               })}
             </tbody>
           </table>
-          </div>
         )}
         {filtered.length > PAGE_SIZE && (() => {
           const btn = (disabled) => ({
