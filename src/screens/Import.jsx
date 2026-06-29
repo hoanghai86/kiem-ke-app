@@ -21,6 +21,8 @@ const COL_MAP = {
   mãkho:          'ma_kho',
   slthucte:       'so_luong_thuc_te',
   slthực:         'so_luong_thuc_te',
+  slthựctế:       'so_luong_thuc_te',
+  sltt:           'so_luong_thuc_te',
   soluongthucte:  'so_luong_thuc_te',
   sốlượngthựctế:  'so_luong_thuc_te',
   slkiemke:       'so_luong_thuc_te',
@@ -88,6 +90,7 @@ export default function Import({ currentUser }) {
   const [phienId, setPhienId]       = useState('')
   const [khoList, setKhoList]       = useState([])
   const [userMap, setUserMap]       = useState({})
+  const [vaiTroNhap, setVaiTroNhap] = useState('ke_toan')
   const [rows, setRows]             = useState(null)   // parsed Excel rows
   const [fileErr, setFileErr]       = useState(null)
   const [importing, setImporting]   = useState(false)
@@ -141,6 +144,10 @@ export default function Import({ currentUser }) {
     const phien = phienList.find(p => p.id === phienId)
     const defaultKho = phien?.ma_kho || ''
 
+    const nguoiNhapId = currentUser.role === 'admin'
+      ? (vaiTroNhap === 'ke_toan' ? phien?.ke_toan_id : phien?.thu_kho_id) ?? currentUser.id
+      : currentUser.id
+
     // Lấy tên VT từ IndexedDB để điền vào nếu ten_vt trống
     const vtArr = await db.dm_vat_tu.toArray()
     const vtMap = {}; vtArr.forEach(v => { vtMap[v.ma_vt] = v.ten_vt || v.ma_vt })
@@ -179,7 +186,7 @@ export default function Import({ currentUser }) {
           ghi_chu: String(r.ghi_chu || '').trim() || null,
           hinh_anh_urls: [],
           da_doi_chieu: false,
-          nguoi_nhap_id: currentUser.id,
+          nguoi_nhap_id: nguoiNhapId,
           ngoai_so_sach: false,
         })
         count++
@@ -277,9 +284,34 @@ export default function Import({ currentUser }) {
           )}
         </div>
 
+        {/* Vai trò nhập — chỉ admin */}
+        {currentUser.role === 'admin' && phienSel && (
+          <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>2. Nhập với tư cách</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                { val: 'ke_toan', label: 'Kế toán', name: userMap[phienSel.ke_toan_id] || '—' },
+                { val: 'thu_kho', label: 'Thủ kho', name: userMap[phienSel.thu_kho_id] || '—' },
+              ].map(opt => (
+                <button key={opt.val} onClick={() => setVaiTroNhap(opt.val)} style={{
+                  flex: 1, padding: '10px 8px', borderRadius: 8, cursor: 'pointer',
+                  border: `2px solid ${vaiTroNhap === opt.val ? '#1D9E75' : 'var(--border)'}`,
+                  background: vaiTroNhap === opt.val ? '#F0FDF4' : '#fff',
+                  textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{opt.label}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: vaiTroNhap === opt.val ? '#1D9E75' : 'var(--text)' }}>{opt.name}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Chọn file */}
         <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
-          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>2. Chọn file Excel</div>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
+            {currentUser.role === 'admin' ? '3.' : '2.'} Chọn file Excel
+          </div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv"
             onChange={handleFile} style={{ display: 'none' }} id="import-xlsx-input" />
           <label htmlFor="import-xlsx-input" style={{
