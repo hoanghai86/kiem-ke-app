@@ -9,6 +9,13 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
+  const [foundUser, setFoundUser] = useState(null)
+
+  async function lookupUser(ma) {
+    if (!ma.trim()) { setFoundUser(null); return }
+    const user = await db.dm_user.get(ma.trim())
+    setFoundUser(user || null)
+  }
 
   async function handleLogin() {
     if (!maUser.trim() || !password) return
@@ -91,11 +98,20 @@ export default function Login({ onLogin }) {
             className="input-field"
             placeholder="VD: KT01"
             value={maUser}
-            onChange={e => setMaUser(e.target.value.toUpperCase())}
+            onChange={e => { const v = e.target.value.toUpperCase(); setMaUser(v); lookupUser(v) }}
             onKeyDown={e => e.key === 'Enter' && handleLogin()}
             autoComplete="username"
             autoCapitalize="characters"
           />
+          {foundUser && (
+            <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, color: '#1d9e75', fontWeight: 600 }}>✓ {foundUser.ho_ten}</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{foundUser.role === 'ke_toan' ? 'Kế toán' : foundUser.role === 'thu_kho' ? 'Thủ kho' : 'Admin'}</span>
+            </div>
+          )}
+          {maUser.trim() && !foundUser && (
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>Chưa có trong bộ nhớ offline</div>
+          )}
         </div>
 
         <div className="field-group">
