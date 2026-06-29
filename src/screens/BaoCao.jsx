@@ -1112,9 +1112,9 @@ export default function BaoCao({ currentUser }) {
                 const heSo = row.he_so_quy_doi
                 return (
                   <tr key={i}>
-                    <td style={{ ...tdStyle, overflow: 'hidden' }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ten_vt}</div>
+                    <td style={{ ...tdStyle }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.3 }}>{row.ten_vt}</div>
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
                       <div style={{ fontSize: 12 }}>{row.so_luong_thuc_te != null ? fmtSL(row.so_luong_thuc_te) : '—'}</div>
