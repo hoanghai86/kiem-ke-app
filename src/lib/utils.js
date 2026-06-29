@@ -1,3 +1,6 @@
+export const toSearchable = (str) =>
+  (str || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd')
+
 export const fmtSL = (n) => {
   if (n == null || n === '') return ''
   const num = Number(n)

@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { db, getGoiYVatTu } from '../lib/db'
 import { Html5Qrcode } from 'html5-qrcode'
+import { toSearchable } from '../lib/utils'
 
 function genMaVtNSS() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -39,9 +40,9 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
 
   useEffect(() => {
     if (!query.trim()) { setKetQua([]); return }
-    const q = query.toLowerCase()
+    const q = toSearchable(query)
     db.dm_vat_tu
-      .filter(v => v.ten_vt.toLowerCase().includes(q) || v.ma_vt.toLowerCase().includes(q))
+      .filter(v => toSearchable(v.ten_vt).includes(q) || toSearchable(v.ma_vt).includes(q))
       .limit(30)
       .toArray()
       .then(setKetQua)
