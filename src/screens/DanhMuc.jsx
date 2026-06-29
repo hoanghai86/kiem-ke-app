@@ -886,7 +886,8 @@ export default function DanhMuc({ inline = false }) {
         ) : filtered.length === 0 ? (
           <div className="empty-state">Không có dữ liệu</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table style={{ width: '100%', minWidth: tab === 'ton_kho' ? 560 : undefined, borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
                 <th style={{ padding: '8px 6px', textAlign: 'center', width: 36 }}>
@@ -897,11 +898,11 @@ export default function DanhMuc({ inline = false }) {
                       else setCheckedIds(new Set())
                     }} />
                 </th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>Mã</th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>Tên</th>
-                {(tab === 'vat_tu' || tab === 'ton_kho') && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>ĐVT</th>}
-                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>SL SS</th>}
-                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap' }}>Mã kho</th>}
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: tab === 'ton_kho' ? 90 : undefined }}>Mã</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: tab === 'ton_kho' ? 160 : undefined }}>Tên</th>
+                {(tab === 'vat_tu' || tab === 'ton_kho') && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, minWidth: 56 }}>ĐVT</th>}
+                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 90 }}>SL SS</th>}
+                {tab === 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 80 }}>Mã kho</th>}
                 {tab !== 'ton_kho' && <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--text-muted)', fontSize: 11 }}>TT</th>}
               </tr>
             </thead>
@@ -983,6 +984,7 @@ export default function DanhMuc({ inline = false }) {
               })}
             </tbody>
           </table>
+          </div>
         )}
         {filtered.length > PAGE_SIZE && (() => {
           const btn = (disabled) => ({
