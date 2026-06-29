@@ -21,7 +21,7 @@ export default function KiemKe({ currentUser }) {
   const [vatTuCoDinh, setVatTuCoDinh] = useState(null) // { ma_vt, ten_vt }
   const [autoOpenVt, setAutoOpenVt]   = useState(false)
   const [dvt, setDvt] = useState('')
-  const [heSo, setHeSo] = useState(1)
+  const [heSo, setHeSo] = useState('1')
   const [soLuong, setSoLuong] = useState('')
   const [luotKiem, setLuotKiem] = useState(1)
   const [ghiChu, setGhiChu] = useState('')
@@ -215,7 +215,7 @@ export default function KiemKe({ currentUser }) {
       setTimeout(() => soLuongRef.current?.focus(), 100)
     } else {
       setDvt('')
-      setHeSo(1)
+      setHeSo('1')
     }
     setSoLuong('')
     setGhiChu('')
@@ -255,7 +255,7 @@ export default function KiemKe({ currentUser }) {
   function handleHuy() {
     setVatTuCoDinh(null)
     setSoLuong('')
-    setHeSo(1)
+    setHeSo('1')
     setGhiChu('')
     setSoSach(null)
     setDvt('')
@@ -970,7 +970,8 @@ export default function KiemKe({ currentUser }) {
             <label className="field-label">Hệ số</label>
             <input type="text" inputMode="decimal" className="input-field" value={heSo}
               onChange={e => setHeSo(e.target.value.replace(/[^\d.]/g, ''))}
-              onFocus={e => e.target.select()} />
+              onFocus={e => e.target.select()}
+              onBlur={e => { const n = parseFloat(e.target.value); if (!isNaN(n) && n > 0) setHeSo(String(n)); else setHeSo('1') }} />
           </div>
         </div>
 
