@@ -593,8 +593,9 @@ export default function KiemKe({ currentUser }) {
                 <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                   <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
                     <label className="field-label">Hệ số</label>
-                    <input type="number" className="input-field" value={editForm.he_so_quy_doi}
-                      onChange={e => setEditForm(f => ({ ...f, he_so_quy_doi: e.target.value }))} min="0" step="any" />
+                    <input type="text" inputMode="decimal" className="input-field" value={editForm.he_so_quy_doi}
+                      onChange={e => setEditForm(f => ({ ...f, he_so_quy_doi: e.target.value.replace(/[^\d.]/g, '') }))}
+                      onFocus={e => e.target.select()} />
                   </div>
                   <div className="field-group" style={{ flex: 1, marginBottom: 0 }}>
                     <label className="field-label">SL quy đổi</label>
@@ -968,8 +969,9 @@ export default function KiemKe({ currentUser }) {
           )}
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Hệ số</label>
-            <input type="number" className="input-field" value={heSo}
-              onChange={e => setHeSo(e.target.value)} min="0" step="any" />
+            <input type="text" inputMode="decimal" className="input-field" value={heSo}
+              onChange={e => setHeSo(e.target.value.replace(/[^\d.]/g, ''))}
+              onFocus={e => e.target.select()} />
           </div>
         </div>
 
