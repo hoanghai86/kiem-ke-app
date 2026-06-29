@@ -125,8 +125,8 @@ export default function BatDauPhien({ currentUser }) {
     setPhienList(rows)
     setLoading(false)
 
-    // Lần đầu mở app mà chưa có dữ liệu local thì sync luôn
-    if (rows.length === 0) syncServer()
+    // Luôn sync server khi có mạng để cập nhật phiên mới nhất
+    if (navigator.onLine) syncServer()
   }
 
   // Mount: chỉ đọc local
