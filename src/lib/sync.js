@@ -166,7 +166,7 @@ let _danhMucChannel = null
 export function subscribeVatTuRealtime() {
   if (_danhMucChannel) return () => {}
   _danhMucChannel = supabase
-    .channel('danh_muc_changes')
+    .channel(`danh_muc_changes_${Date.now()}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_vat_tu' }, async payload => {
       if (payload.eventType === 'DELETE') { if (payload.old?.ma_vt) await db.dm_vat_tu.delete(payload.old.ma_vt) }
       else await db.dm_vat_tu.put(payload.new)

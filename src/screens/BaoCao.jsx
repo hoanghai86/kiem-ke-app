@@ -100,6 +100,7 @@ export default function BaoCao({ currentUser }) {
   const [vatTuResults, setVatTuResults]     = useState([])
   const vatTuAllRef   = useRef([])
   const vatTuModalRef = useRef(null)
+  const loadIdRef     = useRef(0)
 
   const upd = (key, val) => setF(prev => ({ ...prev, [key]: val }))
 
@@ -133,6 +134,9 @@ export default function BaoCao({ currentUser }) {
     { label: 'Mã VT',            get: r => r.ma_vt },
     { label: 'Tên vật tư',       get: r => r.ten_vt },
     { label: 'ĐVT chính',        get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
+    { label: 'ĐVT kiểm',         get: r => dvtMap[r.ma_dvt_kiem] || r.ma_dvt_kiem || '' },
+    { label: 'Hệ số QĐ',         get: r => r.he_so_quy_doi ?? '', excel: r => r.he_so_quy_doi ?? '' },
+    { label: 'SL kiểm kê',       get: r => r.so_luong_thuc_te != null ? fmtSL(r.so_luong_thuc_te) : '', excel: r => r.so_luong_thuc_te ?? '' },
     { label: 'SL quy đổi',       get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '', excel: r => r.so_luong_quy_doi ?? '' },
     { label: 'SL sổ sách',       get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '', excel: r => r.so_luong_so_sach ?? '' },
     { label: 'Lệch KT-SS/TK-SS', get: r => r.chenh_lech != null ? fmtSL(r.chenh_lech) : '', excel: r => r.chenh_lech ?? '' },
@@ -202,6 +206,7 @@ export default function BaoCao({ currentUser }) {
   }, [f.tuNgay, f.denNgay])
 
   const loadData = useCallback(async () => {
+    const id = ++loadIdRef.current
     setLoading(true)
     setData([])
     try {
@@ -233,6 +238,7 @@ export default function BaoCao({ currentUser }) {
         }).toArray()
         rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
 
+        if (id !== loadIdRef.current) return
         setData(rows.map(r => {
           const phien = phienById[r.phien_id] || {}
           return {
@@ -255,25 +261,27 @@ export default function BaoCao({ currentUser }) {
         .select('id,phien_id,ma_vt,ten_vt,ma_kho,dm_kho(ten_kho),ma_dvt_kiem,he_so_quy_doi,so_luong_thuc_te,so_luong_quy_doi,so_luong_so_sach,chenh_lech,ghi_chu,created_at,nguoi_nhap_id,phien_kiem_ke!inner(id,ma_kho,ngay_kiem,ke_toan_id,thu_kho_id,xac_nhan_ke_toan,xac_nhan_thu_kho,dm_kho(ten_kho))')
         .order('created_at', { ascending: false })
 
-      // Xây phien_id filter: kết hợp phiên chọn trực tiếp + filter kế toán/thủ kho
+      // Xây phien_id filter dùng phienList (đã load đúng theo ngày)
+      let finalIds
       if (f.keToan.length > 0 || f.thuKho.length > 0) {
         let match = phienList
         if (f.keToan.length > 0) match = match.filter(p => f.keToan.includes(p.ke_toan_id))
         if (f.thuKho.length > 0) match = match.filter(p => f.thuKho.includes(p.thu_kho_id))
         const matchIds = match.map(p => p.id)
-        const finalIds = f.phien.length > 0 ? matchIds.filter(id => f.phien.includes(id)) : matchIds
-        if (finalIds.length === 0) { setData([]); setLoading(false); return }
-        q = q.in('phien_id', finalIds)
+        finalIds = f.phien.length > 0 ? matchIds.filter(id => f.phien.includes(id)) : matchIds
       } else if (f.phien.length > 0) {
-        q = q.in('phien_id', f.phien)
+        finalIds = f.phien
       } else {
-        q = q.gte('phien_kiem_ke.ngay_kiem', f.tuNgay).lte('phien_kiem_ke.ngay_kiem', f.denNgay)
+        finalIds = phienList.map(p => p.id)
       }
+      if (finalIds.length === 0) { if (id === loadIdRef.current) { setData([]); setLoading(false) }; return }
+      q = q.in('phien_id', finalIds)
       if (f.kho.length > 0) q = q.in('ma_kho', f.kho)
 
       if (tab === 'thua_thieu') q = q.not('chenh_lech', 'is', null).neq('chenh_lech', 0)
 
       const { data: rows } = await q
+      if (id !== loadIdRef.current) return
       setData((rows || []).map(r => ({
         ...r,
         _ke_toan:    userMap[r.phien_kiem_ke?.ke_toan_id]?.ho_ten || '',
@@ -281,7 +289,7 @@ export default function BaoCao({ currentUser }) {
         _nguoi_nhap: userMap[r.nguoi_nhap_id]?.ho_ten || '',
       })))
     } finally {
-      setLoading(false)
+      if (id === loadIdRef.current) setLoading(false)
     }
   }, [tab, f.tuNgay, f.denNgay, f.kho, f.phien, f.keToan, f.thuKho, userMap, phienList, khoList])
 
@@ -396,6 +404,7 @@ export default function BaoCao({ currentUser }) {
     const p = r.phien_kiem_ke
     if (!p) return false
     const role = userMap[r.nguoi_nhap_id]?.role
+    if (!role) return true  // không xác định được → không lọc
     return f.loaiDuLieu === 'ke_toan'
       ? (role === 'ke_toan' || role === 'admin')
       : role === 'thu_kho'
@@ -410,12 +419,15 @@ export default function BaoCao({ currentUser }) {
     const map = new Map()
     for (const r of displayData) {
       if (!map.has(r.ma_vt)) {
-        map.set(r.ma_vt, { ma_vt: r.ma_vt, ten_vt: r.ten_vt, so_luong_quy_doi: 0, so_luong_so_sach: null, chenh_lech: 0 })
+        map.set(r.ma_vt, { ma_vt: r.ma_vt, ten_vt: r.ten_vt, so_luong_thuc_te: 0, so_luong_quy_doi: 0, so_luong_so_sach: null, chenh_lech: 0, ma_dvt_kiem: null, he_so_quy_doi: null })
       }
       const g = map.get(r.ma_vt)
+      g.so_luong_thuc_te += r.so_luong_thuc_te ?? 0
       g.so_luong_quy_doi += r.so_luong_quy_doi ?? 0
       if (r.so_luong_so_sach != null) g.so_luong_so_sach = (g.so_luong_so_sach ?? 0) + r.so_luong_so_sach
       g.chenh_lech += r.chenh_lech ?? 0
+      if (!g.ma_dvt_kiem && r.ma_dvt_kiem) g.ma_dvt_kiem = r.ma_dvt_kiem
+      if (!g.he_so_quy_doi && r.he_so_quy_doi) g.he_so_quy_doi = r.he_so_quy_doi
     }
     return [...map.values()]
   })()
@@ -949,35 +961,46 @@ export default function BaoCao({ currentUser }) {
               {tonKhoRows.length === 0 ? 'Không có dữ liệu tồn kho' : 'Không tìm thấy vật tư khớp'}
             </div>
           ) : (
-            <table style={{ borderCollapse: 'collapse', fontSize: 12, whiteSpace: 'nowrap', width: '100%' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col style={{ width: 32 }} />
+                <col />
+                <col style={{ width: 72 }} />
+                <col style={{ width: 80 }} />
+              </colgroup>
               <thead>
                 <tr>
-                  {colTonKho.map(c => (
-                    <th key={c.label} style={{
-                      padding: '8px 12px', background: '#1D9E75', color: '#fff',
-                      fontWeight: 600, textAlign: c.label === 'SL sổ sách' ? 'right' : 'left',
+                  {[{ l: 'STT' }, { l: 'Mã / Tên VT' }, { l: 'ĐVT' }, { l: 'SL SS', right: true }].map(c => (
+                    <th key={c.l} style={{
+                      padding: '8px 6px', background: '#1D9E75', color: '#fff',
+                      fontWeight: 600, fontSize: 12,
+                      textAlign: c.right ? 'right' : 'left',
                       position: 'sticky', top: 0, zIndex: 1
-                    }}>{c.label}</th>
+                    }}>{c.l}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {pageDisplayTonKho.map((row, i) => (
-                  <tr key={`${row.ma_vt}_${row.ma_kho}`} style={{ background: (pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB' }}>
-                    {colTonKho.map(c => {
-                      const val = c.get(row, pageStart + i)
-                      return (
-                        <td key={c.label} style={{
-                          padding: '7px 12px', borderBottom: '1px solid #F3F4F6',
-                          textAlign: c.label === 'SL sổ sách' ? 'right' : 'left',
-                          fontWeight: c.label === 'SL sổ sách' ? 600 : 400,
-                        }}>
-                          {val}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
+                {pageDisplayTonKho.map((row, i) => {
+                  const tenKho = khoList.find(k => k.ma_kho === row.ma_kho)?.ten_kho || row.ma_kho || ''
+                  const dvt = dvtMap[vtDvtChinhMap[row.ma_vt]] || vtDvtChinhMap[row.ma_vt] || ''
+                  const bg = (pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB'
+                  const tdStyle = { padding: '7px 6px', borderBottom: '1px solid #F3F4F6', background: bg, verticalAlign: 'middle' }
+                  return (
+                    <tr key={`${row.ma_vt}_${row.ma_kho}`}>
+                      <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)' }}>{pageStart + i + 1}</td>
+                      <td style={{ ...tdStyle, overflow: 'hidden' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vtNameMap[row.ma_vt] || ''}</div>
+                        {tenKho && <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tenKho}</div>}
+                      </td>
+                      <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)' }}>{dvt}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 600, fontSize: 13 }}>
+                        {row.so_luong_so_sach != null ? fmtSL(row.so_luong_so_sach) : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           )
@@ -992,15 +1015,27 @@ export default function BaoCao({ currentUser }) {
                 : 'Không có lệch giữa KT và TK ✓'}
             </div>
           ) : (
-            <table style={{ borderCollapse: 'collapse', fontSize: 12, whiteSpace: 'nowrap', width: '100%' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
+              <colgroup>
+                <col />
+                <col style={{ width: 58 }} />
+                <col style={{ width: 58 }} />
+                <col style={{ width: 62 }} />
+              </colgroup>
               <thead>
                 <tr>
-                  {['Mã VT', 'Tên vật tư', 'DVT', 'Kho', 'Phiên', 'SL Kế toán', 'SL Thủ kho', 'Lệch KT-TK'].map(h => (
-                    <th key={h} style={{
-                      padding: '8px 12px', background: '#1D9E75', color: '#fff', fontWeight: 600,
-                      textAlign: ['SL Kế toán','SL Thủ kho','Lệch KT-TK'].includes(h) ? 'right' : 'left',
+                  {[
+                    { l: 'Mã / Tên VT', right: false },
+                    { l: 'KT',    right: true },
+                    { l: 'TK',    right: true },
+                    { l: 'Lệch',  right: true },
+                  ].map(c => (
+                    <th key={c.l} style={{
+                      padding: '8px 6px', background: '#1D9E75', color: '#fff',
+                      fontWeight: 600, fontSize: 12,
+                      textAlign: c.right ? 'right' : 'left',
                       position: 'sticky', top: 0, zIndex: 1
-                    }}>{h}</th>
+                    }}>{c.l}</th>
                   ))}
                 </tr>
               </thead>
@@ -1008,20 +1043,22 @@ export default function BaoCao({ currentUser }) {
                 {pageSoSanhRows.map((r, i) => {
                   const lech = (r.sl_kt ?? 0) - (r.sl_tk ?? 0)
                   const missing = r.sl_kt === null || r.sl_tk === null
+                  const bg = missing ? '#FFFBEB' : '#FEF2F2'
+                  const tdStyle = { padding: '7px 6px', borderBottom: '1px solid #F3F4F6', background: bg, verticalAlign: 'middle' }
                   return (
-                    <tr key={i} style={{ background: missing ? '#FFFBEB' : '#FEF2F2' }}>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', fontWeight: 600 }}>{r.ma_vt}</td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6' }}>{r.ten_vt}</td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', color: 'var(--text-muted)' }}>{r.ma_dvt}</td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6' }}>{r.kho}</td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', color: 'var(--text-muted)' }}>{r.phien}</td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>
+                    <tr key={i}>
+                      <td style={{ ...tdStyle, overflow: 'hidden' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ma_vt}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ten_vt}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[r.kho, r.phien].filter(Boolean).join(' · ')}</div>
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
                         {r.sl_kt !== null ? fmtSL(r.sl_kt) : <span style={{ color: '#F59E0B' }}>—</span>}
                       </td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', textAlign: 'right' }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
                         {r.sl_tk !== null ? fmtSL(r.sl_tk) : <span style={{ color: '#F59E0B' }}>—</span>}
                       </td>
-                      <td style={{ padding: '7px 12px', borderBottom: '1px solid #F3F4F6', textAlign: 'right', fontWeight: 700, color: missing ? '#D97706' : '#DC2626' }}>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13, color: missing ? '#D97706' : lech > 0 ? '#D97706' : '#DC2626' }}>
                         {missing ? '?' : lech > 0 ? `+${fmtSL(lech)}` : fmtSL(lech)}
                       </td>
                     </tr>
@@ -1037,6 +1074,70 @@ export default function BaoCao({ currentUser }) {
               ? 'Dùng bộ lọc để chọn ngày, kho, kế toán, thủ kho cần xem'
               : tab === 'thua_thieu' ? 'Không có hàng thừa/thiếu ✓' : 'Không tìm thấy vật tư khớp'}
           </div>
+        ) : tab === 'thua_thieu' ? (
+          <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col />
+              <col style={{ width: 66 }} />
+              <col style={{ width: 40 }} />
+              <col style={{ width: 58 }} />
+              <col style={{ width: 58 }} />
+              <col style={{ width: 58 }} />
+            </colgroup>
+            <thead>
+              <tr>
+                {[
+                  { l: 'Mã / Tên VT', right: false },
+                  { l: 'SL Kiểm',     right: true },
+                  { l: '×Hệ',         right: true },
+                  { l: 'SL QĐ',       right: true },
+                  { l: 'SL SS',       right: true },
+                  { l: 'Lệch',        right: true },
+                ].map(c => (
+                  <th key={c.l} style={{
+                    padding: '8px 4px', background: '#1D9E75', color: '#fff',
+                    fontWeight: 600, fontSize: 11,
+                    textAlign: c.right ? 'right' : 'left',
+                    position: 'sticky', top: 0, zIndex: 1
+                  }}>{c.l}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pageDisplayDataFinal.map((row, i) => {
+                const cl = parseFloat(row.chenh_lech)
+                const bg = cl < 0 ? '#FEF2F2' : '#F0FDF4'
+                const tdStyle = { padding: '7px 4px', borderBottom: '1px solid #F3F4F6', background: bg, verticalAlign: 'middle' }
+                const dvtKiem = dvtMap[row.ma_dvt_kiem] || row.ma_dvt_kiem || ''
+                const heSo = row.he_so_quy_doi
+                return (
+                  <tr key={i}>
+                    <td style={{ ...tdStyle, overflow: 'hidden' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ten_vt}</div>
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>
+                      <div style={{ fontSize: 12 }}>{row.so_luong_thuc_te != null ? fmtSL(row.so_luong_thuc_te) : '—'}</div>
+                      {dvtKiem && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dvtKiem}</div>}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
+                      {heSo != null ? fmtSL(heSo) : '—'}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
+                      {row.so_luong_quy_doi != null ? fmtSL(row.so_luong_quy_doi) : '—'}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
+                      {row.so_luong_so_sach != null ? fmtSL(row.so_luong_so_sach) : '—'}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13,
+                      color: isNaN(cl) ? 'inherit' : cl < 0 ? '#DC2626' : '#16A34A' }}>
+                      {!isNaN(cl) ? (cl > 0 ? '+' : '') + fmtSL(cl) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         ) : (
           <table style={{ borderCollapse: 'collapse', fontSize: 12, whiteSpace: 'nowrap', width: '100%' }}>
             <thead>
@@ -1051,14 +1152,10 @@ export default function BaoCao({ currentUser }) {
             </thead>
             <tbody>
               {pageDisplayDataFinal.map((row, i) => {
-                const cl     = parseFloat(row.chenh_lech)
-                const rowBg  = tab === 'thua_thieu'
-                  ? (cl < 0 ? '#FEF2F2' : '#F0FDF4')
-                  : ((pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB')
-                const clickable = tab === 'kiem_ke'
+                const rowBg  = (pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB'
                 return (
-                  <tr key={i} style={{ background: rowBg, cursor: clickable ? 'pointer' : 'default' }}
-                    onClick={() => clickable && openDetail(row)}>
+                  <tr key={i} style={{ background: rowBg, cursor: 'pointer' }}
+                    onClick={() => openDetail(row)}>
                     {cols.map(c => {
                       const val    = c.get(row, pageStart + i)
                       const isLech = c.label === 'Lệch KT-SS/TK-SS'
