@@ -985,8 +985,9 @@ export default function KiemKe({ currentUser }) {
           </div>
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Lượt</label>
-            <input type="number" className="input-field" value={luotKiem}
-              onChange={e => setLuotKiem(parseInt(e.target.value))} min="1" />
+            <input type="text" inputMode="numeric" className="input-field" value={luotKiem}
+              onChange={e => setLuotKiem(parseInt(e.target.value.replace(/\D/g, '')) || 1)}
+              onFocus={e => e.target.select()} />
           </div>
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Theo kho</label>
