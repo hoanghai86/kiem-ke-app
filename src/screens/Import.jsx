@@ -220,6 +220,7 @@ export default function Import({ currentUser }) {
     <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <div className="topbar">
         <div className="topbar-title">Import</div>
+        <div className="topbar-sub">Nhập số liệu kiểm kê từ Excel</div>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: 16, paddingBottom: 80, display: 'flex', flexDirection: 'column', gap: 16 }}>
