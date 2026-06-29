@@ -156,7 +156,7 @@ export default function BaoCao({ currentUser }) {
           setDvtMap(map)
           setDanhMucDvt(data || [])
         })
-      supabase.from('dm_vat_tu').select('ma_vt,ten_vt,ma_dvt_chinh').eq('active', true)
+      supabase.from('dm_vat_tu').select('ma_vt,ten_vt,ma_dvt_chinh')
         .then(({ data }) => {
           const mapDvt = {}, mapName = {}
           ;(data || []).forEach(v => {
@@ -171,7 +171,7 @@ export default function BaoCao({ currentUser }) {
         db.dm_kho.toArray(),
         db.dm_user.toArray(),
         db.dm_dvt.toArray(),
-        db.dm_vat_tu.filter(v => v.active !== false).toArray(),
+        db.dm_vat_tu.toArray(),
       ]).then(([khos, users, dvts, vts]) => {
         setKhoList(khos)
         const uMap = {}
