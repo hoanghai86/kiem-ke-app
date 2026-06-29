@@ -109,9 +109,6 @@ export default function Login({ onLogin }) {
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{foundUser.role === 'ke_toan' ? 'Kế toán' : foundUser.role === 'thu_kho' ? 'Thủ kho' : 'Admin'}</span>
             </div>
           )}
-          {maUser.trim() && !foundUser && (
-            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>Chưa có trong bộ nhớ offline</div>
-          )}
         </div>
 
         <div className="field-group">
