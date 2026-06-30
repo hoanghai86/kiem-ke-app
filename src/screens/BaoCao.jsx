@@ -61,6 +61,9 @@ const INIT_FILTERS = () => ({
 export default function BaoCao({ currentUser }) {
   const [tab, setTab]             = useState('kiem_ke')
   const [f, setF]                 = useState(INIT_FILTERS)
+  // Bản nháp bộ lọc — chỉnh trong panel "Lọc" không kích hoạt tải dữ liệu ngay (tránh chớp nháy
+  // liên tục từng điều kiện một); chỉ áp dụng vào `f` (driver tải dữ liệu) khi bấm "Tìm kiếm".
+  const [draft, setDraft]         = useState(INIT_FILTERS)
   const [khoList, setKhoList]     = useState([])
   const [phienList, setPhienList] = useState([])
   const [userMap, setUserMap]     = useState({})
@@ -97,6 +100,10 @@ export default function BaoCao({ currentUser }) {
   const [editKhoQ, setEditKhoQ] = useState('')
   const [page, setPage] = useState(1)
 
+  // Edit ĐVT fullscreen modal — đồng bộ kiểu chọn với màn hình nhập SL kiểm kê
+  const [openEditDvtModal, setOpenEditDvtModal] = useState(false)
+  const [editDvtQ, setEditDvtQ] = useState('')
+
   // Vật tư filter fullscreen modal
   const [openVatTuModal, setOpenVatTuModal] = useState(false)
   const [vatTuModalQ, setVatTuModalQ]       = useState('')
@@ -106,7 +113,7 @@ export default function BaoCao({ currentUser }) {
   const vatTuModalRef = useRef(null)
   const loadIdRef     = useRef(0)
 
-  const upd = (key, val) => setF(prev => ({ ...prev, [key]: val }))
+  const updDraft = (key, val) => setDraft(prev => ({ ...prev, [key]: val }))
 
   const colKiemKe = [
     { label: 'Stt',        get: (r, i) => i + 1 },
@@ -138,13 +145,11 @@ export default function BaoCao({ currentUser }) {
     { label: 'Mã VT',            get: r => r.ma_vt },
     { label: 'Tên vật tư',       get: r => r.ten_vt },
     { label: 'ĐVT chính',        get: r => dvtMap[vtDvtChinhMap[r.ma_vt]] || vtDvtChinhMap[r.ma_vt] || '' },
-    { label: 'ĐVT kiểm',         get: r => dvtMap[r.ma_dvt_kiem] || r.ma_dvt_kiem || '' },
-    { label: 'Hệ số QĐ',         get: r => r.he_so_quy_doi ?? '', excel: r => r.he_so_quy_doi ?? '' },
-    { label: 'SL kiểm kê',       get: r => r.so_luong_thuc_te != null ? fmtSL(r.so_luong_thuc_te) : '', excel: r => r.so_luong_thuc_te ?? '' },
     { label: 'SL quy đổi',       get: r => r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '', excel: r => r.so_luong_quy_doi ?? '' },
     { label: 'SL sổ sách',       get: r => r.so_luong_so_sach != null ? fmtSL(r.so_luong_so_sach) : '', excel: r => r.so_luong_so_sach ?? '' },
     { label: 'Lệch KT-SS/TK-SS', get: r => r.chenh_lech != null ? fmtSL(r.chenh_lech) : '', excel: r => r.chenh_lech ?? '' },
-    { label: 'Ghi chú',          get: r => r.ghi_chu || '' },
+    { label: 'Kho',              get: r => khoList.find(k => k.ma_kho === r.ma_kho)?.ten_kho || r.ma_kho || '' },
+    { label: 'Phiên',            get: r => [...(r.phienIds || [])].map(id => '#' + id.slice(-4).toUpperCase()).join(', ') },
   ]
 
   useEffect(() => {
@@ -193,21 +198,21 @@ export default function BaoCao({ currentUser }) {
     }
   }, [])
 
+  // Danh sách phiên cho picker "Phiên kiểm kê" — KHÔNG lọc theo Từ/Đến ngày. Mã phiên kiểu
+  // #9C10/#95E2 không ai nhớ nổi để gõ tìm, nên picker luôn hiện sẵn để chọn. Ngày tháng vẫn
+  // là điều kiện lọc kết quả độc lập — chọn phiên ngoài khoảng ngày thì tìm kiếm ra rỗng,
+  // không cần "đồng bộ" 2 điều kiện với nhau.
   useEffect(() => {
-    upd('phien', [])
     if (navigator.onLine) {
       supabase.from('phien_kiem_ke')
         .select('id,ma_kho,ke_toan_id,thu_kho_id,ngay_kiem')
-        .gte('ngay_kiem', f.tuNgay).lte('ngay_kiem', f.denNgay)
         .order('ngay_kiem', { ascending: false })
+        .limit(200)
         .then(({ data }) => setPhienList(data || []))
     } else {
-      db.phien.filter(p => {
-        const d = (p.ngay_kiem || '').slice(0, 10)
-        return d >= f.tuNgay && d <= f.denNgay
-      }).toArray().then(rows => setPhienList(rows))
+      db.phien.orderBy('ngay_kiem').reverse().toArray().then(rows => setPhienList(rows))
     }
-  }, [f.tuNgay, f.denNgay])
+  }, [])
 
   const loadData = useCallback(async () => {
     const id = ++loadIdRef.current
@@ -219,23 +224,17 @@ export default function BaoCao({ currentUser }) {
         const phienById = {}
         phienList.forEach(p => { phienById[p.id] = p })
 
-        let targetPhienIds
-        if (f.keToan.length > 0 || f.thuKho.length > 0) {
-          let match = phienList
-          if (f.keToan.length > 0) match = match.filter(p => f.keToan.includes(p.ke_toan_id))
-          if (f.thuKho.length > 0) match = match.filter(p => f.thuKho.includes(p.thu_kho_id))
-          const matchIds = match.map(p => p.id)
-          const finalIds = f.phien.length > 0 ? matchIds.filter(id => f.phien.includes(id)) : matchIds
-          if (finalIds.length === 0) { setData([]); return }
-          targetPhienIds = new Set(finalIds)
-        } else if (f.phien.length > 0) {
-          targetPhienIds = new Set(f.phien)
-        } else {
-          targetPhienIds = new Set(Object.keys(phienById))
-        }
-
+        // Ngày tháng, phiên, kế toán, thủ kho đều là điều kiện AND độc lập — chọn phiên ngoài
+        // khoảng ngày (hoặc kế toán/thủ kho không khớp phiên đã chọn) thì ra rỗng, không có
+        // chuyện điều kiện này tự "đồng bộ" lại điều kiện kia.
         let rows = await db.chitiet.filter(r => {
-          if (!targetPhienIds.has(r.phien_id)) return false
+          const phien = phienById[r.phien_id]
+          if (!phien) return false
+          const d = (phien.ngay_kiem || '').slice(0, 10)
+          if (d < f.tuNgay || d > f.denNgay) return false
+          if (f.phien.length > 0 && !f.phien.includes(r.phien_id)) return false
+          if (f.keToan.length > 0 && !f.keToan.includes(phien.ke_toan_id)) return false
+          if (f.thuKho.length > 0 && !f.thuKho.includes(phien.thu_kho_id)) return false
           if (f.kho.length > 0 && !f.kho.includes(r.ma_kho)) return false
           if (tab === 'thua_thieu' && (!r.chenh_lech || r.chenh_lech === 0)) return false
           return true
@@ -260,26 +259,19 @@ export default function BaoCao({ currentUser }) {
         return
       }
 
+      // Ngày tháng, phiên, kế toán, thủ kho đều là điều kiện AND độc lập trên query — chọn
+      // phiên ngoài khoảng ngày (hoặc kế toán/thủ kho không khớp phiên đã chọn) thì ra rỗng,
+      // không cần dò qua phienList ở client để "đồng bộ" các điều kiện với nhau.
       let q = supabase
         .from('kiem_ke_chitiet')
         .select('id,phien_id,ma_vt,ten_vt,ma_kho,dm_kho(ten_kho),ma_dvt_kiem,he_so_quy_doi,so_luong_thuc_te,so_luong_quy_doi,so_luong_so_sach,chenh_lech,ghi_chu,created_at,nguoi_nhap_id,phien_kiem_ke!inner(id,ma_kho,ngay_kiem,ke_toan_id,thu_kho_id,xac_nhan_ke_toan,xac_nhan_thu_kho,dm_kho(ten_kho))')
         .order('created_at', { ascending: false })
+        .gte('phien_kiem_ke.ngay_kiem', f.tuNgay)
+        .lte('phien_kiem_ke.ngay_kiem', f.denNgay)
 
-      // Xây phien_id filter dùng phienList (đã load đúng theo ngày)
-      let finalIds
-      if (f.keToan.length > 0 || f.thuKho.length > 0) {
-        let match = phienList
-        if (f.keToan.length > 0) match = match.filter(p => f.keToan.includes(p.ke_toan_id))
-        if (f.thuKho.length > 0) match = match.filter(p => f.thuKho.includes(p.thu_kho_id))
-        const matchIds = match.map(p => p.id)
-        finalIds = f.phien.length > 0 ? matchIds.filter(id => f.phien.includes(id)) : matchIds
-      } else if (f.phien.length > 0) {
-        finalIds = f.phien
-      } else {
-        finalIds = phienList.map(p => p.id)
-      }
-      if (finalIds.length === 0) { if (id === loadIdRef.current) { setData([]); setLoading(false) }; return }
-      q = q.in('phien_id', finalIds)
+      if (f.phien.length > 0) q = q.in('phien_id', f.phien)
+      if (f.keToan.length > 0) q = q.in('phien_kiem_ke.ke_toan_id', f.keToan)
+      if (f.thuKho.length > 0) q = q.in('phien_kiem_ke.thu_kho_id', f.thuKho)
       if (f.kho.length > 0) q = q.in('ma_kho', f.kho)
 
       if (tab === 'thua_thieu') q = q.not('chenh_lech', 'is', null).neq('chenh_lech', 0)
@@ -374,10 +366,12 @@ export default function BaoCao({ currentUser }) {
     // Chỉ hiện "Đang tìm..." nếu chờ hơi lâu (debounce timer chưa bắn) — tránh việc bản thân
     // việc bật/tắt "Đang tìm..." cũng làm React tháo/dựng lại danh sách cũ ngay trên mỗi ký tự gõ.
     const searchingTimer = setTimeout(() => { if (!cancelled) setVatTuSearching(true) }, 120)
+    // Debounce 1s — gõ/xóa (backspace) liên tục không tìm/render lại liên tục, chỉ chạy khi
+    // người dùng đã ngừng gõ được 1 giây.
     const timer = setTimeout(() => {
       const fetchFn = q ? searchVatTu(vatTuModalQ) : listVatTu(VAT_TU_BROWSE_LIMIT)
       fetchFn.then(rows => { if (!cancelled) { setVatTuResults(rows); setVatTuSearching(false) } })
-    }, 400)
+    }, 1000)
     return () => { cancelled = true; clearTimeout(timer); clearTimeout(searchingTimer) }
   }, [vatTuModalQ, openVatTuModal])
 
@@ -421,9 +415,11 @@ export default function BaoCao({ currentUser }) {
     ? afterRole.filter(r => f.vatTu.includes(r.ma_vt))
     : afterRole
 
-  // Tab Thừa/Thiếu SS: group by ma_vt, SUM sl_quy_doi; sl_so_sach đếm 1 lần mỗi (ma_vt, ma_kho)
+  // Tab Thừa/Thiếu SS: group by (ma_vt, ma_kho) — SS sổ sách là theo vật tư + kho, không theo
+  // phiên, nên 1 kho có nhiều phiên cùng kiểm 1 mặt hàng vẫn phải cộng dồn vào 1 dòng rồi mới so
+  // với SS (tách theo phiên sẽ ra lệch ảo ở từng dòng dù cộng lại đúng số). Không gộp các ĐVT phụ
+  // khác nhau (thùng, gói...) thành một dòng "SL Kiểm/×Hệ"; chỉ SUM sl_quy_doi (đã quy về ĐVT chính).
   const displayDataFinal = tab !== 'thua_thieu' ? displayData : (() => {
-    // Dedup so_luong_so_sach: chỉ lấy giá trị đầu tiên cho mỗi cặp (ma_vt, ma_kho)
     const ssPerKho = new Map()
     for (const r of displayData) {
       const key = `${r.ma_vt}__${r.ma_kho ?? ''}`
@@ -432,25 +428,22 @@ export default function BaoCao({ currentUser }) {
 
     const map = new Map()
     for (const r of displayData) {
-      if (!map.has(r.ma_vt)) {
-        map.set(r.ma_vt, { ma_vt: r.ma_vt, ten_vt: r.ten_vt, so_luong_thuc_te: 0, so_luong_quy_doi: 0, so_luong_so_sach: null, chenh_lech: 0, ma_dvt_kiem: null, he_so_quy_doi: null })
+      const key = `${r.ma_vt}__${r.ma_kho ?? ''}`
+      if (!map.has(key)) {
+        map.set(key, { ma_vt: r.ma_vt, ten_vt: r.ten_vt, ma_kho: r.ma_kho, phienIds: new Set(), so_luong_quy_doi: 0, so_luong_so_sach: null, chenh_lech: 0 })
       }
-      const g = map.get(r.ma_vt)
-      g.so_luong_thuc_te += r.so_luong_thuc_te ?? 0
+      const g = map.get(key)
       g.so_luong_quy_doi += r.so_luong_quy_doi ?? 0
-      if (!g.ma_dvt_kiem && r.ma_dvt_kiem) g.ma_dvt_kiem = r.ma_dvt_kiem
-      if (!g.he_so_quy_doi && r.he_so_quy_doi) g.he_so_quy_doi = r.he_so_quy_doi
+      if (r.phien_id) g.phienIds.add(r.phien_id)
     }
 
-    // Cộng sl_so_sach mỗi (ma_vt, ma_kho) đúng 1 lần
-    for (const [key, ss] of ssPerKho) {
-      const maVt = key.slice(0, key.lastIndexOf('__'))
-      const g = map.get(maVt)
-      if (g) g.so_luong_so_sach = (g.so_luong_so_sach ?? 0) + ss
+    for (const g of map.values()) {
+      const ss = ssPerKho.get(`${g.ma_vt}__${g.ma_kho ?? ''}`)
+      g.so_luong_so_sach = ss ?? null
+      // Không có dòng SS cho (vt, kho) này coi như sổ sách = 0 — khớp quy ước tính chenh_lech
+      // toàn hệ thống (trigger calc_kiem_ke trong schema.sql và saveChiTietLocal đều coalesce 0).
+      g.chenh_lech = g.so_luong_quy_doi - (ss ?? 0)
     }
-
-    // Tính lại chenh_lech từ tổng quy đổi và sl_so_sach đã dedup
-    for (const g of map.values()) g.chenh_lech = g.so_luong_quy_doi - (g.so_luong_so_sach ?? 0)
 
     return [...map.values()]
   })()
@@ -583,11 +576,10 @@ export default function BaoCao({ currentUser }) {
             <div className="field-group">
               <label className="field-label">ĐVT</label>
               {editMode
-                ? <select className="input-select" value={form.ma_dvt_kiem}
-                    onChange={e => setForm(f => ({ ...f, ma_dvt_kiem: e.target.value }))}>
-                    <option value="">-- Chọn --</option>
-                    {danhMucDvt.map(d => <option key={d.ma_dvt} value={d.ma_dvt}>{d.ten_dvt}</option>)}
-                  </select>
+                ? <div className="input-select" onClick={() => { setEditDvtQ(''); setOpenEditDvtModal(true) }}
+                    style={{ cursor: 'pointer', color: form.ma_dvt_kiem ? 'var(--text)' : 'var(--text-muted)' }}>
+                    {form.ma_dvt_kiem ? (dvtMap[form.ma_dvt_kiem] || form.ma_dvt_kiem) : '-- Chọn --'}
+                  </div>
                 : <div className="input-readonly">{dvtMap[detailItem.ma_dvt_kiem] || detailItem.ma_dvt_kiem || '—'}</div>
               }
             </div>
@@ -726,6 +718,38 @@ export default function BaoCao({ currentUser }) {
             </div>
           </div>
         )}
+
+        {openEditDvtModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <button onClick={() => { setOpenEditDvtModal(false); setEditDvtQ('') }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', padding: 0, color: 'var(--text)' }}>✕</button>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Chọn đơn vị tính</span>
+              </div>
+              <input type="text" className="input-field" placeholder="Tìm đơn vị tính..."
+                value={editDvtQ} onChange={e => setEditDvtQ(e.target.value)} autoFocus />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {danhMucDvt
+                .filter(d => !editDvtQ.trim() ||
+                  toSearchable(d.ten_dvt).includes(toSearchable(editDvtQ)) ||
+                  toSearchable(d.ma_dvt).includes(toSearchable(editDvtQ)))
+                .map(d => {
+                  const selected = form.ma_dvt_kiem === d.ma_dvt
+                  return (
+                    <div key={d.ma_dvt}
+                      onClick={() => { setForm(f => ({ ...f, ma_dvt_kiem: d.ma_dvt })); setOpenEditDvtModal(false); setEditDvtQ('') }}
+                      style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, background: selected ? '#F0FDF4' : '#fff' }}>
+                      <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{d.ma_dvt}</span>
+                      <span style={{ fontSize: 15, fontWeight: selected ? 600 : 400 }}>{d.ten_dvt}</span>
+                      {selected && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -736,8 +760,8 @@ export default function BaoCao({ currentUser }) {
   const keToanList   = Object.values(userMap).filter(u => u.role === 'ke_toan')
   const thuKhoList   = Object.values(userMap).filter(u => u.role === 'thu_kho')
 
-  const fldLabel = (type) => {
-    const arr = f[type]
+  const fldLabel = (type, src = f) => {
+    const arr = src[type]
     if (!arr.length) return type === 'phien' ? 'Tất cả phiên' : type === 'kho' ? 'Tất cả kho' : 'Tất cả'
     const first = arr[0]
     const rest = arr.length - 1
@@ -753,12 +777,12 @@ export default function BaoCao({ currentUser }) {
     return rest > 0 ? `${firstName} +${rest}` : firstName
   }
 
-  const fldColor = (type) => f[type].length > 0 ? 'var(--text)' : 'var(--text-muted)'
+  const fldColor = (type, src = f) => src[type].length > 0 ? 'var(--text)' : 'var(--text-muted)'
 
-  const vatTuLabel = () => {
-    if (!f.vatTu.length) return 'Tất cả vật tư'
-    const first = vtNameMap[f.vatTu[0]] || f.vatTu[0]
-    return f.vatTu.length > 1 ? `${first} +${f.vatTu.length - 1}` : first
+  const vatTuLabel = (src = f) => {
+    if (!src.vatTu.length) return 'Tất cả vật tư'
+    const first = vtNameMap[src.vatTu[0]] || src.vatTu[0]
+    return src.vatTu.length > 1 ? `${first} +${src.vatTu.length - 1}` : first
   }
 
   const todayStr = getToday()
@@ -772,6 +796,24 @@ export default function BaoCao({ currentUser }) {
   const fmtDate   = d => d ? d.slice(8) + '/' + d.slice(5, 7) : ''
   const dateLabel = f.tuNgay === f.denNgay ? fmtDate(f.tuNgay) : `${fmtDate(f.tuNgay)}–${fmtDate(f.denNgay)}`
   const rowCount  = tab === 'so_sanh' ? soSanhRows.length : tab === 'ton_kho' ? displayTonKho.length : tab === 'ngoai_so_sach' ? nssItems.length : displayDataFinal.length
+
+  const isRefreshing = tab === 'ton_kho' ? loadingTonKho : tab === 'ngoai_so_sach' ? loadingNSS : loading
+  function refreshReport() {
+    if (tab === 'ton_kho') loadTonKho()
+    else if (tab === 'ngoai_so_sach') loadNSS()
+    else loadData()
+  }
+
+  // Modal chọn vật tư: ghim các mã đang được chọn lên đầu (kể cả khi nằm ngoài danh sách
+  // đang hiện) để không mất dấu lựa chọn cũ khi mở lại modal. Phần còn lại giữ nguyên thứ tự
+  // đã trả về (listVatTu sắp theo mã, searchVatTu sắp theo độ liên quan).
+  const byMa = (a, b) => (a.ma_vt < b.ma_vt ? -1 : a.ma_vt > b.ma_vt ? 1 : 0)
+  const vatTuDisplayList = (() => {
+    const selectedSet = new Set(vatTuModalSel)
+    const selectedRows = vatTuModalSel.map(ma_vt => ({ ma_vt, ten_vt: vtNameMap[ma_vt] || '' })).sort(byMa)
+    const rest = vatTuResults.filter(v => !selectedSet.has(v.ma_vt))
+    return [...selectedRows, ...rest]
+  })()
 
   const totalPages = Math.max(1, Math.ceil(rowCount / PAGE_SIZE))
   const pageStart  = (page - 1) * PAGE_SIZE
@@ -821,12 +863,16 @@ export default function BaoCao({ currentUser }) {
         })()}
         <span style={{ flex: 1 }} />
         {activeFilterCount > 0 && (
-          <button onClick={() => setF(INIT_FILTERS)} style={{
+          <button onClick={() => { setF(INIT_FILTERS); setDraft(INIT_FILTERS) }} style={{
             border: 'none', background: 'none', color: 'var(--text-muted)',
             fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap'
           }}>Xóa lọc</button>
         )}
-        <button onClick={() => setShowFilters(v => !v)} style={{
+        <button onClick={() => setShowFilters(v => {
+          const next = !v
+          if (next) setDraft(f)
+          return next
+        })} style={{
           padding: '0 16px', height: 38, borderRadius: 8, border: '1px solid var(--border)',
           background: activeFilterCount > 0 ? 'var(--green)' : '#fff',
           color: activeFilterCount > 0 ? '#fff' : 'var(--text)',
@@ -842,13 +888,13 @@ export default function BaoCao({ currentUser }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Từ ngày</div>
-                <input type="date" className="input-field" value={f.tuNgay}
-                  onChange={e => upd('tuNgay', e.target.value)} style={{ width: '100%' }} />
+                <input type="date" className="input-field" value={draft.tuNgay}
+                  onChange={e => updDraft('tuNgay', e.target.value)} style={{ width: '100%' }} />
               </div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Đến ngày</div>
-                <input type="date" className="input-field" value={f.denNgay}
-                  onChange={e => upd('denNgay', e.target.value)} style={{ width: '100%' }} />
+                <input type="date" className="input-field" value={draft.denNgay}
+                  onChange={e => updDraft('denNgay', e.target.value)} style={{ width: '100%' }} />
               </div>
             </div>
           )}
@@ -859,8 +905,8 @@ export default function BaoCao({ currentUser }) {
               {tab !== 'so_sanh' && tab !== 'ngoai_so_sach' && (
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Loại dữ liệu</div>
-                  <select className="input-select" value={f.loaiDuLieu}
-                    onChange={e => upd('loaiDuLieu', e.target.value)} style={{ width: '100%' }}>
+                  <select className="input-select" value={draft.loaiDuLieu}
+                    onChange={e => updDraft('loaiDuLieu', e.target.value)} style={{ width: '100%' }}>
                     <option value="ke_toan">Số liệu kế toán</option>
                     <option value="thu_kho">Số liệu thủ kho</option>
                   </select>
@@ -868,16 +914,16 @@ export default function BaoCao({ currentUser }) {
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Phiên kiểm kê</div>
-                <div className="input-select" onClick={() => { setFilterModal('phien'); setFilterModalSel(f.phien); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
-                  style={{ cursor: 'pointer', color: fldColor('phien'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {fldLabel('phien')}
+                <div className="input-select" onClick={() => { setFilterModal('phien'); setFilterModalSel(draft.phien); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('phien', draft), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('phien', draft)}
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kho</div>
-                <div className="input-select" onClick={() => { setFilterModal('kho'); setFilterModalSel(f.kho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
-                  style={{ cursor: 'pointer', color: fldColor('kho'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {fldLabel('kho')}
+                <div className="input-select" onClick={() => { setFilterModal('kho'); setFilterModalSel(draft.kho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('kho', draft), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('kho', draft)}
                 </div>
               </div>
             </div>
@@ -885,16 +931,16 @@ export default function BaoCao({ currentUser }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kho</div>
-                <div className="input-select" onClick={() => { setFilterModal('kho'); setFilterModalSel(f.kho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
-                  style={{ cursor: 'pointer', color: fldColor('kho') }}>
-                  {fldLabel('kho')}
+                <div className="input-select" onClick={() => { setFilterModal('kho'); setFilterModalSel(draft.kho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('kho', draft) }}>
+                  {fldLabel('kho', draft)}
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
-                <div className="input-select" onClick={() => { setVatTuModalQ(''); setVatTuModalSel(f.vatTu); setOpenVatTuModal(true) }}
-                  style={{ cursor: 'pointer', color: f.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {vatTuLabel()}
+                <div className="input-select" onClick={() => { setVatTuModalQ(''); setVatTuModalSel(draft.vatTu); setOpenVatTuModal(true) }}
+                  style={{ cursor: 'pointer', color: draft.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {vatTuLabel(draft)}
                 </div>
               </div>
             </div>
@@ -905,28 +951,38 @@ export default function BaoCao({ currentUser }) {
             <div style={{ display: 'flex', gap: 8 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Kế toán</div>
-                <div className="input-select" onClick={() => { setFilterModal('keToan'); setFilterModalSel(f.keToan); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
-                  style={{ cursor: 'pointer', color: fldColor('keToan'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {fldLabel('keToan')}
+                <div className="input-select" onClick={() => { setFilterModal('keToan'); setFilterModalSel(draft.keToan); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('keToan', draft), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('keToan', draft)}
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Thủ kho</div>
-                <div className="input-select" onClick={() => { setFilterModal('thuKho'); setFilterModalSel(f.thuKho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
-                  style={{ cursor: 'pointer', color: fldColor('thuKho'), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {fldLabel('thuKho')}
+                <div className="input-select" onClick={() => { setFilterModal('thuKho'); setFilterModalSel(draft.thuKho); setFilterModalQ(''); setTimeout(() => filterModalRef.current?.focus(), 100) }}
+                  style={{ cursor: 'pointer', color: fldColor('thuKho', draft), overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {fldLabel('thuKho', draft)}
                 </div>
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>Vật tư</div>
-                <div className="input-select" onClick={() => { setVatTuModalQ(''); setVatTuModalSel(f.vatTu); setOpenVatTuModal(true) }}
-                  style={{ cursor: 'pointer', color: f.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {vatTuLabel()}
+                <div className="input-select" onClick={() => { setVatTuModalQ(''); setVatTuModalSel(draft.vatTu); setOpenVatTuModal(true) }}
+                  style={{ cursor: 'pointer', color: draft.vatTu.length ? 'var(--text)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {vatTuLabel(draft)}
                 </div>
               </div>
             </div>
           )}
 
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <button onClick={() => setDraft(INIT_FILTERS)} style={{
+              flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid var(--border)',
+              background: '#fff', color: 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer'
+            }}>Thiết lập lại</button>
+            <button onClick={() => { setF(draft); setShowFilters(false) }} style={{
+              flex: 1, padding: '10px 0', borderRadius: 8, border: 'none',
+              background: 'var(--green)', color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer'
+            }}>Tìm kiếm</button>
+          </div>
         </div>
       )}
 
@@ -943,7 +999,7 @@ export default function BaoCao({ currentUser }) {
       </div>
       <div style={{ height: 6, background: '#F3F4F6', flexShrink: 0 }} />
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: rowCount > PAGE_SIZE ? 112 : 0 }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 112 }}>
         {tab === 'ngoai_so_sach' ? (
           <>
             {reconcileItem && (
@@ -1102,8 +1158,7 @@ export default function BaoCao({ currentUser }) {
           <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
             <colgroup>
               <col />
-              <col style={{ width: 66 }} />
-              <col style={{ width: 40 }} />
+              <col style={{ width: 56 }} />
               <col style={{ width: 58 }} />
               <col style={{ width: 58 }} />
               <col style={{ width: 58 }} />
@@ -1112,8 +1167,7 @@ export default function BaoCao({ currentUser }) {
               <tr>
                 {[
                   { l: 'Mã / Tên VT', right: false },
-                  { l: 'SL Kiểm',     right: true },
-                  { l: '×Hệ',         right: true },
+                  { l: 'ĐVT chính',   right: false },
                   { l: 'SL QĐ',       right: true },
                   { l: 'SL SS',       right: true },
                   { l: 'Lệch',        right: true },
@@ -1130,22 +1184,27 @@ export default function BaoCao({ currentUser }) {
             <tbody>
               {pageDisplayDataFinal.map((row, i) => {
                 const cl = parseFloat(row.chenh_lech)
-                const bg = cl < 0 ? '#FEF2F2' : '#F0FDF4'
+                const bg = isNaN(cl) ? '#fff' : cl < 0 ? '#FEF2F2' : '#F0FDF4'
                 const tdStyle = { padding: '7px 4px', borderBottom: '1px solid #F3F4F6', background: bg, verticalAlign: 'middle' }
-                const dvtKiem = dvtMap[row.ma_dvt_kiem] || row.ma_dvt_kiem || ''
-                const heSo = row.he_so_quy_doi
+                const dvtChinh = dvtMap[vtDvtChinhMap[row.ma_vt]] || vtDvtChinhMap[row.ma_vt] || ''
+                const tenKho = khoMap[row.ma_kho] || row.ma_kho || ''
+                const phienIds = [...(row.phienIds || [])]
+                const maPhien = phienIds.length === 1
+                  ? '#' + phienIds[0].slice(-4).toUpperCase()
+                  : phienIds.length > 1 ? `${phienIds.length} phiên` : ''
                 return (
                   <tr key={i}>
                     <td style={{ ...tdStyle }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
                       <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.3 }}>{row.ten_vt}</div>
+                      {(tenKho || maPhien) && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {[tenKho, maPhien].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
                     </td>
-                    <td style={{ ...tdStyle, textAlign: 'right' }}>
-                      <div style={{ fontSize: 12 }}>{row.so_luong_thuc_te != null ? fmtSL(row.so_luong_thuc_te) : '—'}</div>
-                      {dvtKiem && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{dvtKiem}</div>}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: 'var(--text-muted)' }}>
-                      {heSo != null ? fmtSL(heSo) : '—'}
+                    <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)' }}>
+                      {dvtChinh}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
                       {row.so_luong_quy_doi != null ? fmtSL(row.so_luong_quy_doi) : '—'}
@@ -1203,7 +1262,7 @@ export default function BaoCao({ currentUser }) {
         )}
       </div>
 
-      {rowCount > PAGE_SIZE && (() => {
+      {(() => {
         const btnStyle = (disabled) => ({
           border: '1px solid var(--border)', borderRadius: 6,
           padding: '5px 11px', fontSize: 14, background: '#fff',
@@ -1226,6 +1285,14 @@ export default function BaoCao({ currentUser }) {
             </span>
             <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages} style={btnStyle(page === totalPages)}>›</button>
             <button onClick={() => setPage(totalPages)} disabled={page === totalPages} style={btnStyle(page === totalPages)}>»</button>
+            <span style={{ color: 'var(--border)' }}>|</span>
+            <button onClick={refreshReport} disabled={isRefreshing} style={{
+              border: 'none', background: 'none', padding: 0,
+              fontSize: 13, fontWeight: 600, color: 'var(--green)',
+              cursor: isRefreshing ? 'default' : 'pointer', opacity: isRefreshing ? 0.6 : 1, whiteSpace: 'nowrap'
+            }}>
+              Làm tươi
+            </button>
           </div>
         )
       })()}
@@ -1238,7 +1305,7 @@ export default function BaoCao({ currentUser }) {
               <div style={{ display: 'flex', gap: 16 }}>
                 <button onClick={() => setVatTuModalSel([])}
                   style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
-                <button onClick={() => { upd('vatTu', vatTuModalSel); setOpenVatTuModal(false) }}
+                <button onClick={() => { updDraft('vatTu', vatTuModalSel); setOpenVatTuModal(false) }}
                   style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
               </div>
             </div>
@@ -1254,7 +1321,7 @@ export default function BaoCao({ currentUser }) {
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Đang tìm...</div>
             ) : vatTuResults.length === 0 && vatTuModalQ.trim() ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Không tìm thấy vật tư</div>
-            ) : vatTuResults.map(v => {
+            ) : vatTuDisplayList.map(v => {
               const checked = vatTuModalSel.includes(v.ma_vt)
               return (
                 <div key={v.ma_vt} onClick={() => setVatTuModalSel(prev => checked ? prev.filter(x => x !== v.ma_vt) : [...prev, v.ma_vt])}
@@ -1309,7 +1376,7 @@ export default function BaoCao({ currentUser }) {
                 <span style={{ fontWeight: 600, fontSize: 15 }}>{TITLES[filterModal]}</span>
                 <div style={{ display: 'flex', gap: 16 }}>
                   <button onClick={() => setFilterModalSel([])} style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xóa chọn</button>
-                  <button onClick={() => { upd(filterModal, filterModalSel); setFilterModal(null); setFilterModalQ('') }} style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
+                  <button onClick={() => { updDraft(filterModal, filterModalSel); setFilterModal(null); setFilterModalQ('') }} style={{ border: 'none', background: 'none', color: 'var(--green)', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>Xong</button>
                 </div>
               </div>
               <input ref={filterModalRef} type="text" className="input-field"

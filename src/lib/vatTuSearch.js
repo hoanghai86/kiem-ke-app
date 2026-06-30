@@ -51,12 +51,15 @@ export function invalidateVatTuIndex() {
 }
 
 const byName = (a, b) => (a.searchTen < b.searchTen ? -1 : a.searchTen > b.searchTen ? 1 : 0)
+const byMa   = (a, b) => (a.row.ma_vt < b.row.ma_vt ? -1 : a.row.ma_vt > b.row.ma_vt ? 1 : 0)
 
-// Danh sách mặc định (không gõ gì) — sắp theo tên, dùng cho màn hình lọc/duyệt.
+// Danh sách mặc định (không gõ gì) — sắp theo mã, dùng cho màn hình lọc/duyệt. Sắp theo mã
+// TRƯỚC khi cắt theo `limit` — nếu sắp theo tên rồi mới cắt, mã nhỏ (vd "0000000001") có tên
+// rơi ngoài top-N-theo-tên sẽ bị cắt mất, không bao giờ xuất hiện được trong danh sách duyệt.
 // `limit` không truyền = lấy hết (cẩn thận: dùng cho tìm kiếm có query, không phải duyệt toàn bộ catalog).
 export async function listVatTu(limit) {
   await ensureVatTuIndex()
-  const all = [...rowsByMaVt.values()].sort(byName)
+  const all = [...rowsByMaVt.values()].sort(byMa)
   return (limit ? all.slice(0, limit) : all).map(e => e.row)
 }
 
