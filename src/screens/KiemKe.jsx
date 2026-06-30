@@ -768,7 +768,7 @@ export default function KiemKe({ currentUser }) {
         </div>
       </div>
 
-      <div className="content" style={{ paddingBottom: 72 }}>
+      <div className="content">
         {/* Banner khóa khi có xác nhận */}
         {(phien?.xac_nhan_ke_toan || phien?.xac_nhan_thu_kho) && (
           <div style={{
@@ -1050,11 +1050,9 @@ export default function KiemKe({ currentUser }) {
 
       </div>
 
-      {/* Footer fixed — đè lên content, nằm ngay trên bàn phím khi keyboard mở */}
+      {/* Footer sticky — bám sát cuối content, không chừa khoảng trắng khi content ngắn */}
       <div style={{
-        position: 'fixed', bottom: 0, zIndex: 10,
-        left: '50%', transform: 'translateX(-50%)',
-        width: '100%', maxWidth: 480,
+        position: 'sticky', bottom: 0, zIndex: 10,
         display: 'flex', gap: 8,
         padding: '8px 16px',
         borderTop: '1px solid var(--border)', background: '#fff'
