@@ -6,6 +6,7 @@ import {
   getPendingSyncQueue,
   removeSyncQueueItem
 } from './db'
+import { invalidateVatTuIndex } from './vatTuSearch'
 
 // -----------------------------------------------
 // Pull danh mục từ Supabase xuống IndexedDB
@@ -67,6 +68,7 @@ export async function pullDanhMuc() {
         }
       }
     )
+    if (vatTu.data) invalidateVatTuIndex()
     console.log('[Sync] Pull danh mục OK — kho:', kho.data?.length, 'vật tư:', vatTu.data?.length)
     return { ok: true }
   } catch (err) {
@@ -170,6 +172,7 @@ export function subscribeVatTuRealtime() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_vat_tu' }, async payload => {
       if (payload.eventType === 'DELETE') { if (payload.old?.ma_vt) await db.dm_vat_tu.delete(payload.old.ma_vt) }
       else await db.dm_vat_tu.put(payload.new)
+      invalidateVatTuIndex()
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'dm_kho' }, async payload => {
       if (payload.eventType === 'DELETE') { if (payload.old?.ma_kho) await db.dm_kho.delete(payload.old.ma_kho) }

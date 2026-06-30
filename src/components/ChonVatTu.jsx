@@ -2,7 +2,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { db, getGoiYVatTu } from '../lib/db'
 import { Html5Qrcode } from 'html5-qrcode'
-import { toSearchable } from '../lib/utils'
+import { ensureVatTuIndex, invalidateVatTuIndex, searchVatTu } from '../lib/vatTuSearch'
+import Highlight from './Highlight'
+
+const MIN_QUERY_LEN = 3 // gõ dưới 3 ký tự khớp quá rộng, không có ý nghĩa tìm kiếm — chưa tìm
 
 function genMaVtNSS() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -23,6 +26,7 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
   const tenVtRef   = useRef(null)
   const qrRef      = useRef(null)
   const html5QrRef = useRef(null)
+  const searchIdRef = useRef(0)
 
   useEffect(() => {
     getGoiYVatTu(20).then(setGoiY)
@@ -30,6 +34,7 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
       setDsDvt(rows)
       if (rows.length) setMaDvtNSS(rows[0].ma_dvt)
     })
+    ensureVatTuIndex() // warm sẵn chỉ mục tìm kiếm, tránh khựng ở lần tìm đầu tiên
   }, [])
 
   useEffect(() => {
@@ -39,13 +44,9 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
   }, [open])
 
   useEffect(() => {
-    if (!query.trim()) { setKetQua([]); return }
-    const q = toSearchable(query)
-    db.dm_vat_tu
-      .filter(v => toSearchable(v.ten_vt).includes(q) || toSearchable(v.ma_vt).includes(q))
-      .limit(30)
-      .toArray()
-      .then(setKetQua)
+    const id = ++searchIdRef.current
+    if (query.trim().length < MIN_QUERY_LEN) { setKetQua([]); return }
+    searchVatTu(query, 30).then(rows => { if (id === searchIdRef.current) setKetQua(rows) })
   }, [query])
 
   async function handleSelect(item) {
@@ -70,6 +71,7 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
     const ma_vt = genMaVtNSS()
     const ten_vt = tenVtNSS.trim()
     await db.dm_vat_tu.put({ ma_vt, ten_vt, ngoai_so_sach: true, ma_dvt_kiem: maDvtNSS, active: true })
+    invalidateVatTuIndex()
     onSelect({ ma_vt, ten_vt, ma_dvt_kiem: maDvtNSS, ngoai_so_sach: true })
     setShowNSSForm(false)
     setOpen(false)
@@ -220,7 +222,12 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
                 GẦN ĐÂY
               </div>
             )}
-            {list.length === 0 && query.trim() && (
+            {query.trim().length > 0 && query.trim().length < MIN_QUERY_LEN && (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                Gõ ít nhất {MIN_QUERY_LEN} ký tự để tìm
+              </div>
+            )}
+            {list.length === 0 && query.trim().length >= MIN_QUERY_LEN && (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                 Không tìm thấy vật tư
               </div>
@@ -236,8 +243,8 @@ export default function ChonVatTu({ onSelect, value, autoOpen = false }) {
                   <span style={{
                     background: '#E6F4EF', color: 'var(--green)', borderRadius: 6,
                     padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0
-                  }}>{item.ma_vt}</span>
-                  <span style={{ fontSize: 15, fontWeight: isSelected ? 600 : 400 }}>{item.ten_vt}</span>
+                  }}><Highlight text={item.ma_vt} query={query} /></span>
+                  <span style={{ fontSize: 15, fontWeight: isSelected ? 600 : 400 }}><Highlight text={item.ten_vt} query={query} /></span>
                   {isSelected && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
                 </div>
               )

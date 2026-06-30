@@ -6,6 +6,8 @@ import { db, updateChiTiet, deleteChiTiet, getSoSach } from '../lib/db'
 import { pushOfflineQueue } from '../lib/sync'
 import { fmtSL } from '../lib/utils'
 import ChonVatTu from '../components/ChonVatTu'
+import Highlight from '../components/Highlight'
+import { searchVatTu, listVatTu, invalidateVatTuIndex } from '../lib/vatTuSearch'
 
 const TABS = [
   { key: 'kiem_ke',       label: 'Kiểm kê' },
@@ -42,6 +44,8 @@ async function shareExcel(rows, cols, filename) {
 }
 
 const PAGE_SIZE = 50
+const VAT_TU_BROWSE_LIMIT = 50 // chỉ áp dụng khi chưa gõ tìm (duyệt mặc định); có từ khóa thì hiện hết
+const MIN_VAT_TU_QUERY_LEN = 3 // gõ dưới 3 ký tự thì khớp quá rộng (hàng nghìn dòng) — chưa tìm
 
 const getToday = () => {
   const d = new Date()
@@ -98,7 +102,7 @@ export default function BaoCao({ currentUser }) {
   const [vatTuModalQ, setVatTuModalQ]       = useState('')
   const [vatTuModalSel, setVatTuModalSel]   = useState([])
   const [vatTuResults, setVatTuResults]     = useState([])
-  const vatTuAllRef   = useRef([])
+  const [vatTuSearching, setVatTuSearching] = useState(false)
   const vatTuModalRef = useRef(null)
   const loadIdRef     = useRef(0)
 
@@ -358,21 +362,23 @@ export default function BaoCao({ currentUser }) {
   useEffect(() => { setPage(1) }, [tab, f])
 
   useEffect(() => {
-    if (!openVatTuModal) { vatTuAllRef.current = []; return }
-    db.dm_vat_tu.orderBy('ten_vt').toArray().then(rows => {
-      vatTuAllRef.current = rows
-      setVatTuResults(rows)
-    })
-  }, [openVatTuModal])
-
-  useEffect(() => {
-    if (!openVatTuModal) return
-    const q = toSearchable(vatTuModalQ)
-    const all = vatTuAllRef.current
-    setVatTuResults(q
-      ? all.filter(v => toSearchable(v.ten_vt).includes(q) || toSearchable(v.ma_vt).includes(q))
-      : all
-    )
+    if (!openVatTuModal) { setVatTuResults([]); setVatTuSearching(false); return }
+    const q = vatTuModalQ.trim()
+    // Từ khóa ngắn hơn 3 ký tự khớp quá rộng (hàng nghìn dòng, vd gõ "x") — không tìm, chỉ nhắc
+    // gõ thêm, giống ERP. Tránh luôn việc dựng lại danh sách khổng lồ trong lúc gõ/backspace dở.
+    if (q.length > 0 && q.length < MIN_VAT_TU_QUERY_LEN) {
+      setVatTuResults([]); setVatTuSearching(false)
+      return
+    }
+    let cancelled = false
+    // Chỉ hiện "Đang tìm..." nếu chờ hơi lâu (debounce timer chưa bắn) — tránh việc bản thân
+    // việc bật/tắt "Đang tìm..." cũng làm React tháo/dựng lại danh sách cũ ngay trên mỗi ký tự gõ.
+    const searchingTimer = setTimeout(() => { if (!cancelled) setVatTuSearching(true) }, 120)
+    const timer = setTimeout(() => {
+      const fetchFn = q ? searchVatTu(vatTuModalQ) : listVatTu(VAT_TU_BROWSE_LIMIT)
+      fetchFn.then(rows => { if (!cancelled) { setVatTuResults(rows); setVatTuSearching(false) } })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(timer); clearTimeout(searchingTimer) }
   }, [vatTuModalQ, openVatTuModal])
 
   async function doReconcile(item, vtDung) {
@@ -389,6 +395,7 @@ export default function BaoCao({ currentUser }) {
       })
     }
     await db.dm_vat_tu.delete(item.ma_vt)
+    invalidateVatTuIndex()
     await db.goi_y_vat_tu.delete(item.ma_vt)
     if (navigator.onLine) pushOfflineQueue()
     setReconcileItem(null)
@@ -459,6 +466,7 @@ export default function BaoCao({ currentUser }) {
     data.forEach(r => {
       const p = r.phien_kiem_ke
       if (!p) return
+      if (f.vatTu.length > 0 && !f.vatTu.includes(r.ma_vt)) return
       const key = `${r.phien_id}_${r.ma_vt}`
       if (!map[key]) {
         map[key] = {
@@ -1240,7 +1248,11 @@ export default function BaoCao({ currentUser }) {
               style={{ margin: 0 }} autoFocus />
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {vatTuResults.length === 0 && vatTuModalQ.trim() ? (
+            {vatTuModalQ.trim().length > 0 && vatTuModalQ.trim().length < MIN_VAT_TU_QUERY_LEN ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Gõ ít nhất {MIN_VAT_TU_QUERY_LEN} ký tự để tìm</div>
+            ) : vatTuSearching ? (
+              <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Đang tìm...</div>
+            ) : vatTuResults.length === 0 && vatTuModalQ.trim() ? (
               <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>Không tìm thấy vật tư</div>
             ) : vatTuResults.map(v => {
               const checked = vatTuModalSel.includes(v.ma_vt)
@@ -1254,11 +1266,18 @@ export default function BaoCao({ currentUser }) {
                   }}>
                     {checked && <span style={{ color: '#fff', fontSize: 13, lineHeight: 1 }}>✓</span>}
                   </div>
-                  <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{v.ma_vt}</span>
-                  <span style={{ fontSize: 14 }}>{v.ten_vt}</span>
+                  <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>
+                    <Highlight text={v.ma_vt} query={vatTuModalQ} />
+                  </span>
+                  <span style={{ fontSize: 14 }}><Highlight text={v.ten_vt} query={vatTuModalQ} /></span>
                 </div>
               )
             })}
+            {!vatTuModalQ.trim() && vatTuResults.length === VAT_TU_BROWSE_LIMIT && (
+              <div style={{ padding: '12px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+                Đang hiện {VAT_TU_BROWSE_LIMIT} mục đầu — gõ để tìm vật tư cụ thể
+              </div>
+            )}
           </div>
         </div>
       )}
