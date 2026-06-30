@@ -10,10 +10,6 @@ root.render(
   </React.StrictMode>
 )
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
-      .catch(err => console.error('[SW] Đăng ký thất bại:', err))
-  })
-}
+// Đăng ký service worker thật sự nằm ở public/index.html (script inline, chạy trước khi
+// bundle này tải xong) — nó cũng xử lý luôn việc dọn SW cũ khi không phải bản production.
 

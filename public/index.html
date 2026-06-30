@@ -18,21 +18,34 @@
   <div id="root"></div>
 
   <script>
+    // Chỉ đăng ký service worker ở bản production. Ở dev (npm start) bundle không có hash
+    // tên file nên chiến lược cache-first của SW sẽ trả JS/CSS cũ mãi mãi sau mỗi lần sửa code,
+    // F5 thường không thấy thay đổi (phải F5 cứng mới bypass được SW).
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-          .then(reg => {
-            console.log('[SW] Registered:', reg.scope)
+      if ('%NODE_ENV%' === 'production') {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then(reg => {
+              console.log('[SW] Registered:', reg.scope)
 
-            // Lắng nghe message từ SW (sync request)
-            navigator.serviceWorker.addEventListener('message', event => {
-              if (event.data?.type === 'SYNC_REQUESTED') {
-                window.dispatchEvent(new Event('online'))
-              }
+              // Lắng nghe message từ SW (sync request)
+              navigator.serviceWorker.addEventListener('message', event => {
+                if (event.data?.type === 'SYNC_REQUESTED') {
+                  window.dispatchEvent(new Event('online'))
+                }
+              })
             })
-          })
-          .catch(err => console.error('[SW] Error:', err))
-      })
+            .catch(err => console.error('[SW] Error:', err))
+        })
+      } else {
+        // Tự dọn SW + cache còn sót lại từ lần chạy production/test trước trên cùng origin —
+        // tránh việc nó tiếp tục chặn request và trả bundle.js cũ dù code đã sửa.
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          if (regs.length) console.log('[SW] Dev mode — gỡ', regs.length, 'service worker còn sót lại')
+          regs.forEach(r => r.unregister())
+        })
+        if ('caches' in window) caches.keys().then(keys => keys.forEach(k => caches.delete(k)))
+      }
     }
   </script>
 </body>
