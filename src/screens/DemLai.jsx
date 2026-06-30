@@ -53,6 +53,7 @@ export default function DemLai({ currentUser }) {
   const [showFilters, setShowFilters] = useState(false)
   const [filterKho, setFilterKho] = useState('')
   const [filterVatTu, setFilterVatTu] = useState('')
+  const [filterXN, setFilterXN] = useState('all')  // 'all' | 'confirmed' | 'unconfirmed'
   const [danhMucKho, setDanhMucKho] = useState([])
 
   // Điều hướng 3 cấp: summary → drill-down → edit
@@ -462,10 +463,16 @@ export default function DemLai({ currentUser }) {
     ? filteredSummary.filter(g => toSearchable(g.ma_vt).includes(kw) || toSearchable(g.ten_vt).includes(kw))
     : filteredSummary
 
-  const hasFilters = !!(filterKho || filterVatTu)
+  const hasFilters = !!(filterKho || filterVatTu || filterXN !== 'all')
   const tongMaVT = afterVatTuFilter.length
   const tongLech = afterVatTuFilter.filter(g => g.chenh !== 0).length
-  const displayRows = afterVatTuFilter.filter(g => filterKL === 'lech' ? g.chenh !== 0 : g.chenh === 0)
+  const displayRows = afterVatTuFilter
+    .filter(g => filterKL === 'lech' ? g.chenh !== 0 : g.chenh === 0)
+    .filter(g => {
+      if (filterXN === 'all') return true
+      const confirmed = isKT ? g.allConfirmedKT : g.allConfirmedTK
+      return filterXN === 'confirmed' ? confirmed : !confirmed
+    })
 
   return (
     <div className="screen">
@@ -518,7 +525,7 @@ export default function DemLai({ currentUser }) {
             </button>
             {hasFilters && (
               <button className="btn-clear-filter"
-                onClick={() => { setFilterKho(''); setFilterVatTu('') }}>
+                onClick={() => { setFilterKho(''); setFilterVatTu(''); setFilterXN('all') }}>
                 Xóa lọc
               </button>
             )}
@@ -541,6 +548,23 @@ export default function DemLai({ currentUser }) {
                 <input type="text" className="input-field" value={filterVatTu}
                   onChange={e => setFilterVatTu(e.target.value)}
                   placeholder="Gõ tên hoặc mã vật tư..." />
+              </div>
+              <div className="field-group" style={{ marginBottom: 0 }}>
+                <label className="field-label">Xác nhận</label>
+                <div className="mode-toggle">
+                  <button className={`mode-tab ${filterXN === 'all' ? 'active' : ''}`}
+                    onClick={() => setFilterXN('all')}>
+                    Tất cả
+                  </button>
+                  <button className={`mode-tab ${filterXN === 'unconfirmed' ? 'active' : ''}`}
+                    onClick={() => setFilterXN('unconfirmed')}>
+                    ✓ Xác nhận
+                  </button>
+                  <button className={`mode-tab ${filterXN === 'confirmed' ? 'active' : ''}`}
+                    onClick={() => setFilterXN('confirmed')}>
+                    ↩ Bỏ XN
+                  </button>
+                </div>
               </div>
             </div>
           )}
