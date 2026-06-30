@@ -1045,51 +1045,6 @@ export default function KiemKe({ currentUser }) {
                 color: 'var(--green-dark)', cursor: 'pointer'
               }}>{danhSach.length} dòng ↗</button>
             </div>
-            {checkedIds.size > 0 && (
-              confirmDeleteChecked ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, marginBottom: 6 }}>
-                  <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {checkedIds.size} dòng đã chọn?</span>
-                  <button onClick={handleDeleteChecked}
-                    style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Xóa</button>
-                  <button onClick={() => setConfirmDeleteChecked(false)}
-                    style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: '#fff', fontSize: 13, cursor: 'pointer' }}>Hủy</button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', marginBottom: 4 }}>
-                  <span style={{ flex: 1, fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>Đã chọn {checkedIds.size} dòng</span>
-                  <button onClick={() => setCheckedIds(new Set())}
-                    style={{ border: 'none', background: 'none', color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer', padding: 0 }}>Bỏ chọn</button>
-                  <button onClick={() => setConfirmDeleteChecked(true)}
-                    style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>Xóa đã chọn ({checkedIds.size})</button>
-                </div>
-              )
-            )}
-            {danhSachHienThi.map(item => (
-              <div key={item.id}
-                onClick={() => setCheckedIds(prev => {
-                  const next = new Set(prev)
-                  next.has(item.id) ? next.delete(item.id) : next.add(item.id)
-                  return next
-                })}
-                style={{ display: 'flex', alignItems: 'flex-start', borderBottom: '1px solid var(--border)', background: checkedIds.has(item.id) ? '#F0FDF4' : 'transparent', cursor: 'pointer' }}>
-                <div style={{ paddingTop: 13, paddingRight: 8, flexShrink: 0 }}>
-                  <input type="checkbox" checked={checkedIds.has(item.id)} onChange={() => {}}
-                    onClick={e => { e.stopPropagation(); setCheckedIds(prev => { const next = new Set(prev); next.has(item.id) ? next.delete(item.id) : next.add(item.id); return next }) }} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {renderItemRow(item, (
-                    <div style={{ display: 'flex', gap: 2 }}>
-                      <button
-                        onClick={e => { e.stopPropagation(); setEditItem(item); setEditForm({ so_luong_thuc_te: item.so_luong_thuc_te, ma_dvt_kiem: item.ma_dvt_kiem, he_so_quy_doi: item.he_so_quy_doi ?? 1, ghi_chu: item.ghi_chu ?? '', ma_kho: item.ma_kho ?? '' }) }}
-                        style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#1a56db', lineHeight: 1 }}>✏️</button>
-                      <button
-                        onClick={e => { e.stopPropagation(); handleDeleteItem(item.id) }}
-                        style={{ border: 'none', background: 'none', fontSize: 15, cursor: 'pointer', padding: '2px 5px', color: '#DC2626', lineHeight: 1 }}>🗑️</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
           </>
         )}
 
