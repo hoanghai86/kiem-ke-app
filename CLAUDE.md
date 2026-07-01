@@ -103,6 +103,7 @@ Bảng kết quả 6 cột (`tableLayout: fixed`, `width: 100%`):
 - `metaSub` = `[maPhien, row._nguoi_nhap, thoiGian].join(' · ')` (kho tách dòng riêng)
 - **Không dùng** `maxWidth: 0` trên td (ẩn hết nội dung trong Chrome)
 
-### MiniKiemKe.jsx — chưa tích hợp
-- File `src/components/MiniKiemKe.jsx` đã commit nhưng chưa được import/dùng ở đâu
-- Cần hỏi người dùng muốn dùng component này ở màn hình nào trước khi tích hợp
+### MiniKiemKe.jsx — đã tích hợp
+- Dùng trong `src/screens/BaoCao.jsx` tab **Thừa/Thiếu SS**
+- Click vào 1 dòng thiếu → hiện form nhập kiểm kê nhanh cho vật tư đó
+- File trước đây untracked, đã commit trong session này
