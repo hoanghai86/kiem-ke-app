@@ -221,7 +221,7 @@ function SyncButton() {
           position: 'fixed',
           top: 58,
           right: 'max(16px, calc((100vw - 480px) / 2 + 16px))',
-          zIndex: 20,
+          zIndex: 210,
           fontSize: 10, padding: '3px 8px', borderRadius: 20,
           border: '1px solid #FCA5A5', background: '#FEF2F2',
           color: '#DC2626', cursor: 'pointer', whiteSpace: 'nowrap'
@@ -253,7 +253,7 @@ function AccountButton({ currentUser, onLogout }) {
     <div ref={menuRef} style={{
       position: 'fixed', top: 19,
       right: 'max(58px, calc((100vw - 480px) / 2 + 58px))',
-      zIndex: 20
+      zIndex: 210
     }}>
       <button onClick={() => setShowMenu(v => !v)} style={{
         width: 34, height: 34, borderRadius: '50%', border: 'none',

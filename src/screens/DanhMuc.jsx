@@ -570,63 +570,109 @@ export default function DanhMuc({ inline = false }) {
         <div className="content">
           {err && <div className="error-box">{err}</div>}
 
-          {tab === 'kho' && <>
-            <div className="field-group">
-              <label className="field-label">Mã kho *</label>
-              <input className="input-field" value={form.ma_kho}
-                onChange={e => setF('ma_kho', e.target.value)}
-                placeholder="VD: KHO01" disabled={editItem && !maEditable} />
-              {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã kho đang được dùng — không thể đổi</div>}
+          {tab === 'kho' && (viewOnly ? (
+            <div style={{ background: 'var(--surface)', borderRadius: 10, marginBottom: 16, overflow: 'hidden' }}>
+              {[
+                { label: 'Mã kho', value: form.ma_kho, bold: true, color: '#1d9e75' },
+                { label: 'Tên kho', value: form.ten_kho },
+                { label: 'Trạng thái', value: form.active ? 'Đang hoạt động' : 'Tạm ẩn' },
+              ].map(({ label, value, bold, color }, i, arr) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13, flexShrink: 0, marginRight: 12 }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: bold ? 600 : 400, color: color || 'var(--text)', textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+                </div>
+              ))}
             </div>
-            <div className="field-group">
-              <label className="field-label">Tên kho *</label>
-              <input className="input-field" value={form.ten_kho}
-                onChange={e => setF('ten_kho', e.target.value)}
-                placeholder="VD: Kho Nguyên Liệu A" />
-            </div>
-          </>}
+          ) : (
+            <>
+              <div className="field-group">
+                <label className="field-label">Mã kho *</label>
+                <input className="input-field" value={form.ma_kho}
+                  onChange={e => setF('ma_kho', e.target.value)}
+                  placeholder="VD: KHO01" disabled={editItem && !maEditable} />
+                {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã kho đang được dùng — không thể đổi</div>}
+              </div>
+              <div className="field-group">
+                <label className="field-label">Tên kho *</label>
+                <input className="input-field" value={form.ten_kho}
+                  onChange={e => setF('ten_kho', e.target.value)}
+                  placeholder="VD: Kho Nguyên Liệu A" />
+              </div>
+            </>
+          ))}
 
-          {tab === 'dvt' && <>
-            <div className="field-group">
-              <label className="field-label">Mã ĐVT *</label>
-              <input className="input-field" value={form.ma_dvt}
-                onChange={e => setF('ma_dvt', e.target.value)}
-                placeholder="VD: KG, CAI, HOP" disabled={editItem && !maEditable} />
-              {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã DVT đang được dùng — không thể đổi</div>}
+          {tab === 'dvt' && (viewOnly ? (
+            <div style={{ background: 'var(--surface)', borderRadius: 10, marginBottom: 16, overflow: 'hidden' }}>
+              {[
+                { label: 'Mã ĐVT', value: form.ma_dvt, bold: true, color: '#1d9e75' },
+                { label: 'Tên đơn vị tính', value: form.ten_dvt },
+                { label: 'Trạng thái', value: form.active ? 'Đang hoạt động' : 'Tạm ẩn' },
+              ].map(({ label, value, bold, color }, i, arr) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13, flexShrink: 0, marginRight: 12 }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: bold ? 600 : 400, color: color || 'var(--text)', textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+                </div>
+              ))}
             </div>
-            <div className="field-group">
-              <label className="field-label">Tên đơn vị tính *</label>
-              <input className="input-field" value={form.ten_dvt}
-                onChange={e => setF('ten_dvt', e.target.value)}
-                placeholder="VD: Kilogram, Cái, Hộp" />
-            </div>
-          </>}
+          ) : (
+            <>
+              <div className="field-group">
+                <label className="field-label">Mã ĐVT *</label>
+                <input className="input-field" value={form.ma_dvt}
+                  onChange={e => setF('ma_dvt', e.target.value)}
+                  placeholder="VD: KG, CAI, HOP" disabled={editItem && !maEditable} />
+                {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã DVT đang được dùng — không thể đổi</div>}
+              </div>
+              <div className="field-group">
+                <label className="field-label">Tên đơn vị tính *</label>
+                <input className="input-field" value={form.ten_dvt}
+                  onChange={e => setF('ten_dvt', e.target.value)}
+                  placeholder="VD: Kilogram, Cái, Hộp" />
+              </div>
+            </>
+          ))}
 
-          {tab === 'vat_tu' && <>
-            <div className="field-group">
-              <label className="field-label">Mã vật tư *</label>
-              <input className="input-field" value={form.ma_vt}
-                onChange={e => setF('ma_vt', e.target.value)}
-                placeholder="VD: VT001" disabled={editItem && !maEditable} />
-              {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã vật tư đang được dùng — không thể đổi</div>}
+          {tab === 'vat_tu' && (viewOnly ? (
+            <div style={{ background: 'var(--surface)', borderRadius: 10, marginBottom: 16, overflow: 'hidden' }}>
+              {[
+                { label: 'Mã vật tư', value: form.ma_vt, bold: true, color: '#1d9e75' },
+                { label: 'Tên vật tư', value: form.ten_vt },
+                { label: 'ĐVT chính', value: form.ma_dvt_chinh || '—' },
+                { label: 'Trạng thái', value: form.active ? 'Đang hoạt động' : 'Tạm ẩn' },
+              ].map(({ label, value, bold, color }, i, arr) => (
+                <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < arr.length - 1 ? '1px solid var(--border)' : 'none' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13, flexShrink: 0, marginRight: 12 }}>{label}</span>
+                  <span style={{ fontSize: 13, fontWeight: bold ? 600 : 400, color: color || 'var(--text)', textAlign: 'right', wordBreak: 'break-word' }}>{value}</span>
+                </div>
+              ))}
             </div>
-            <div className="field-group">
-              <label className="field-label">Tên vật tư *</label>
-              <input className="input-field" value={form.ten_vt}
-                onChange={e => setF('ten_vt', e.target.value)}
-                placeholder="Tên vật tư" />
-            </div>
-            <div className="field-group">
-              <label className="field-label">Đơn vị tính chính</label>
-              <select className="input-select" value={form.ma_dvt_chinh}
-                onChange={e => setF('ma_dvt_chinh', e.target.value)}>
-                <option value="">-- Chọn DVT --</option>
-                {dvtOptions.map(d => (
-                  <option key={d.ma_dvt} value={d.ma_dvt}>{d.ma_dvt}</option>
-                ))}
-              </select>
-            </div>
-          </>}
+          ) : (
+            <>
+              <div className="field-group">
+                <label className="field-label">Mã vật tư *</label>
+                <input className="input-field" value={form.ma_vt}
+                  onChange={e => setF('ma_vt', e.target.value)}
+                  placeholder="VD: VT001" disabled={editItem && !maEditable} />
+                {editItem && !maEditable && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Mã vật tư đang được dùng — không thể đổi</div>}
+              </div>
+              <div className="field-group">
+                <label className="field-label">Tên vật tư *</label>
+                <input className="input-field" value={form.ten_vt}
+                  onChange={e => setF('ten_vt', e.target.value)}
+                  placeholder="Tên vật tư" />
+              </div>
+              <div className="field-group">
+                <label className="field-label">Đơn vị tính chính</label>
+                <select className="input-select" value={form.ma_dvt_chinh}
+                  onChange={e => setF('ma_dvt_chinh', e.target.value)}>
+                  <option value="">-- Chọn DVT --</option>
+                  {dvtOptions.map(d => (
+                    <option key={d.ma_dvt} value={d.ma_dvt}>{d.ma_dvt}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          ))}
 
           {tab === 'ton_kho' && <>
             {viewOnly ? (
@@ -684,7 +730,7 @@ export default function DanhMuc({ inline = false }) {
             )}
           </>}
 
-          {tab !== 'ton_kho' && (
+          {tab !== 'ton_kho' && !viewOnly && (
             <div className="field-group">
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={form.active}
@@ -1019,22 +1065,14 @@ export default function DanhMuc({ inline = false }) {
                             </div>
                           ) : (
                             <div style={{ display: 'flex', gap: 16, justifyContent: 'flex-end' }}>
-                              {tab === 'ton_kho' && (
-                                <button onClick={e => { e.stopPropagation(); openEdit(item, true) }}
-                                  style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#1d9e75', cursor: 'pointer', padding: '4px 0' }}>
-                                  Xem
-                                </button>
-                              )}
+                              <button onClick={e => { e.stopPropagation(); openEdit(item, true) }}
+                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '4px 0' }}>
+                                Xem
+                              </button>
                               <button onClick={e => { e.stopPropagation(); openEdit(item) }}
-                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: 'pointer', padding: '4px 0' }}>
+                                style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#D97706', cursor: 'pointer', padding: '4px 0' }}>
                                 Sửa
                               </button>
-                              {tab !== 'ton_kho' && (
-                                <button onClick={e => { e.stopPropagation(); handleToggleActive(item) }}
-                                  style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#D97706', cursor: 'pointer', padding: '4px 0' }}>
-                                  {item.active ? 'Tạm ẩn' : 'Hiện'}
-                                </button>
-                              )}
                               <button onClick={e => { e.stopPropagation(); setDeletingId(id) }}
                                 style={{ border: 'none', background: 'none', fontSize: 13, fontWeight: 600, color: '#EF4444', cursor: 'pointer', padding: '4px 0' }}>
                                 Xóa

@@ -227,7 +227,7 @@
   position: fixed;
   top: 19px;
   right: max(16px, calc((100vw - 480px) / 2 + 16px));
-  z-index: 20;
+  z-index: 210;
   width: 34px; height: 34px;
   border-radius: 50%;
   border: none;

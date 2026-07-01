@@ -7,6 +7,7 @@ import { pushOfflineQueue } from '../lib/sync'
 import { fmtSL } from '../lib/utils'
 import ChonVatTu from '../components/ChonVatTu'
 import Highlight from '../components/Highlight'
+import MiniKiemKe from '../components/MiniKiemKe'
 import { searchVatTu, listVatTu, invalidateVatTuIndex } from '../lib/vatTuSearch'
 
 const TABS = [
@@ -80,6 +81,8 @@ export default function BaoCao({ currentUser }) {
   // Sub-screen edit state
   const [detailItem, setDetailItem] = useState(null)
   const [editMode, setEditMode]     = useState(false)
+  const [kiemKeSelected, setKiemKeSelected] = useState(null) // accordion row trong tab kiemke
+  const [confirmXoaKiemKe, setConfirmXoaKiemKe] = useState(false)
   const [keyboardOffset, setKeyboardOffset] = useState(0)
   useEffect(() => {
     const vv = window.visualViewport
@@ -91,6 +94,16 @@ export default function BaoCao({ currentUser }) {
   }, [])
   const [form, setForm]             = useState({})
   const [saving, setSaving]         = useState(false)
+
+  // Thừa/Thiếu SS — click dòng → inline actions → MiniKiemKe
+  const [thuaThieuDetail, setThuaThieuDetail] = useState(null)
+  const [showMiniKiemKe, setShowMiniKiemKe]   = useState(false)
+  const [miniKiemKePhienId, setMiniKiemKePhienId] = useState(null)
+  const [showPhienPicker, setShowPhienPicker]     = useState(false)
+  const [phienPickerCandidates, setPhienPickerCandidates] = useState([])
+  const [rememberedPhienId, setRememberedPhienId] = useState(null) // nhớ phiên đã chọn trong session
+  const [confirmXoaHet, setConfirmXoaHet]     = useState(false)
+  const [xoaHetSaving, setXoaHetSaving]       = useState(false)
 
   // Ngoài sổ sách
   const [nssItems, setNssItems]         = useState([])
@@ -245,7 +258,6 @@ export default function BaoCao({ currentUser }) {
           if (f.keToan.length > 0 && !f.keToan.includes(phien.ke_toan_id)) return false
           if (f.thuKho.length > 0 && !f.thuKho.includes(phien.thu_kho_id)) return false
           if (f.kho.length > 0 && !f.kho.includes(r.ma_kho)) return false
-          if (tab === 'thua_thieu' && (!r.chenh_lech || r.chenh_lech === 0)) return false
           return true
         }).toArray()
         rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
@@ -283,8 +295,6 @@ export default function BaoCao({ currentUser }) {
       if (f.thuKho.length > 0) q = q.in('phien_kiem_ke.thu_kho_id', f.thuKho)
       if (f.kho.length > 0) q = q.in('ma_kho', f.kho)
 
-      if (tab === 'thua_thieu') q = q.not('chenh_lech', 'is', null).neq('chenh_lech', 0)
-
       const { data: rows } = await q
       if (id !== loadIdRef.current) return
       setData((rows || []).map(r => ({
@@ -318,7 +328,7 @@ export default function BaoCao({ currentUser }) {
     }
   }, [f.kho])
 
-  useEffect(() => { if (tab === 'ton_kho') loadTonKho() }, [tab, loadTonKho])
+  useEffect(() => { if (tab === 'ton_kho' || tab === 'thua_thieu') loadTonKho() }, [tab, loadTonKho])
 
   const loadNSS = useCallback(async () => {
     setLoadingNSS(true)
@@ -424,37 +434,52 @@ export default function BaoCao({ currentUser }) {
     ? afterRole.filter(r => f.vatTu.includes(r.ma_vt))
     : afterRole
 
-  // Tab Thừa/Thiếu SS: group by (ma_vt, ma_kho) — SS sổ sách là theo vật tư + kho, không theo
-  // phiên, nên 1 kho có nhiều phiên cùng kiểm 1 mặt hàng vẫn phải cộng dồn vào 1 dòng rồi mới so
-  // với SS (tách theo phiên sẽ ra lệch ảo ở từng dòng dù cộng lại đúng số). Không gộp các ĐVT phụ
-  // khác nhau (thùng, gói...) thành một dòng "SL Kiểm/×Hệ"; chỉ SUM sl_quy_doi (đã quy về ĐVT chính).
+  // Tab Thừa/Thiếu SS: FULL OUTER JOIN giữa ton_kho (sổ sách) và kiem_ke_chitiet (đã kiểm).
+  // • Trong SS, chưa kiểm  → SS=X, Kiểm=0, Lệch=-X  (Thiếu)
+  // • Đã kiểm, không có SS → SS=0, Kiểm=Y, Lệch=+Y  (Thừa — vd: hàng có trong DM nhưng ngoài tồn kho kho này)
+  // • Có cả hai            → so sánh bình thường
   const displayDataFinal = tab !== 'thua_thieu' ? displayData : (() => {
-    const ssPerKho = new Map()
+    // Build counted map từ kiem_ke_chitiet (đã qua filter ngày/kho/phiên)
+    const countedMap = new Map()
     for (const r of displayData) {
       const key = `${r.ma_vt}__${r.ma_kho ?? ''}`
-      if (!ssPerKho.has(key) && r.so_luong_so_sach != null) ssPerKho.set(key, r.so_luong_so_sach)
-    }
-
-    const map = new Map()
-    for (const r of displayData) {
-      const key = `${r.ma_vt}__${r.ma_kho ?? ''}`
-      if (!map.has(key)) {
-        map.set(key, { ma_vt: r.ma_vt, ten_vt: r.ten_vt, ma_kho: r.ma_kho, phienIds: new Set(), so_luong_quy_doi: 0, so_luong_so_sach: null, chenh_lech: 0 })
-      }
-      const g = map.get(key)
+      if (!countedMap.has(key)) countedMap.set(key, { ten_vt: r.ten_vt, so_luong_quy_doi: 0, phienIds: new Set() })
+      const g = countedMap.get(key)
       g.so_luong_quy_doi += r.so_luong_quy_doi ?? 0
       if (r.phien_id) g.phienIds.add(r.phien_id)
     }
 
-    for (const g of map.values()) {
-      const ss = ssPerKho.get(`${g.ma_vt}__${g.ma_kho ?? ''}`)
-      g.so_luong_so_sach = ss ?? null
-      // Không có dòng SS cho (vt, kho) này coi như sổ sách = 0 — khớp quy ước tính chenh_lech
-      // toàn hệ thống (trigger calc_kiem_ke trong schema.sql và saveChiTietLocal đều coalesce 0).
-      g.chenh_lech = g.so_luong_quy_doi - (ss ?? 0)
-    }
+    // Build ton_kho map (đã filter kho ở loadTonKho, thêm filter vatTu nếu có)
+    const baseTonKho = f.vatTu.length > 0
+      ? tonKhoRows.filter(r => f.vatTu.includes(r.ma_vt))
+      : tonKhoRows
+    const tonKhoMap = new Map(baseTonKho.map(tk => [`${tk.ma_vt}__${tk.ma_kho ?? ''}`, tk]))
 
-    return [...map.values()]
+    // FULL OUTER JOIN: union tất cả key từ cả hai nguồn, áp thêm filter vatTu cho counted
+    const allKeys = new Set([
+      ...tonKhoMap.keys(),
+      ...(f.vatTu.length > 0
+        ? [...countedMap.keys()].filter(k => f.vatTu.includes(k.split('__')[0]))
+        : countedMap.keys()),
+    ])
+
+    return [...allKeys].map(key => {
+      const ma_vt  = key.split('__')[0]
+      const ma_kho = key.split('__')[1] || null
+      const tk      = tonKhoMap.get(key)
+      const counted = countedMap.get(key)
+      const sl_qd   = counted?.so_luong_quy_doi ?? 0
+      const ss      = tk?.so_luong_so_sach ?? 0
+      return {
+        ma_vt,
+        ten_vt:           vtNameMap[ma_vt] || counted?.ten_vt || ma_vt,
+        ma_kho,
+        so_luong_quy_doi: sl_qd,
+        so_luong_so_sach: tk?.so_luong_so_sach ?? null,
+        chenh_lech:       sl_qd - ss,
+        phienIds:         counted?.phienIds ?? new Set(),
+      }
+    })
   })()
 
   const displayTonKho = f.vatTu.length > 0
@@ -492,9 +517,9 @@ export default function BaoCao({ currentUser }) {
   })()
 
   // ── Sub-screen: Xem / Sửa / Xóa ──────────────────────────────────
-  function openDetail(row) {
+  function openDetail(row, edit = false) {
     setDetailItem(row)
-    setEditMode(false)
+    setEditMode(edit)
     setForm({
       so_luong_thuc_te: row.so_luong_thuc_te,
       ma_dvt_kiem: row.ma_dvt_kiem || '',
@@ -502,6 +527,17 @@ export default function BaoCao({ currentUser }) {
       ghi_chu: row.ghi_chu || '',
       ma_kho: row.ma_kho || '',
     })
+  }
+
+  async function handleDeleteKiemKe() {
+    if (!kiemKeSelected) return
+    setSaving(true)
+    await deleteChiTiet(kiemKeSelected.id)
+    if (navigator.onLine) pushOfflineQueue()
+    setData(prev => prev.filter(r => r.id !== kiemKeSelected.id))
+    setSaving(false)
+    setConfirmXoaKiemKe(false)
+    setKiemKeSelected(null)
   }
 
   function closeDetail() {
@@ -550,6 +586,61 @@ export default function BaoCao({ currentUser }) {
     const tenChinh = maChinh ? (dvtMap[maChinh] || maChinh) : (dvtMap[form.ma_dvt_kiem] || form.ma_dvt_kiem)
     return `${fmtSL(sl * hs)} ${tenChinh}`
   })()
+
+  function openMiniKiemKe(phienIds) {
+    const ids = [...(phienIds || [])]
+
+    // Nếu mặt hàng chưa được kiểm (phienIds rỗng) → dùng tất cả phiên user thuộc về làm pool
+    const pool = ids.length > 0
+      ? ids
+      : phienList.filter(p => p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id).map(p => p.id)
+
+    const mine = pool.filter(id => {
+      const p = phienList.find(p => p.id === id)
+      return p && (p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id)
+    })
+    const candidates = mine.length > 0 ? mine : pool
+
+    if (candidates.length === 0) {
+      alert('Chưa có phiên kiểm kê nào. Vui lòng tạo phiên trước.')
+    } else if (candidates.length === 1) {
+      setMiniKiemKePhienId(candidates[0])
+      setShowMiniKiemKe(true)
+    } else if (rememberedPhienId && candidates.includes(rememberedPhienId)) {
+      // Đã chọn phiên trước đó → dùng lại, không hỏi nữa
+      setMiniKiemKePhienId(rememberedPhienId)
+      setShowMiniKiemKe(true)
+    } else {
+      // Nhiều phiên, chưa có lựa chọn → hiện picker 1 lần với đúng danh sách candidates
+      setPhienPickerCandidates(candidates)
+      setShowPhienPicker(true)
+    }
+  }
+
+  async function handleXoaHet() {
+    if (!thuaThieuDetail) return
+    setXoaHetSaving(true)
+    const { ma_vt, ma_kho, phienIds } = thuaThieuDetail
+    const phienIdsArr = [...(phienIds || [])]
+    const rows = await db.chitiet
+      .where('phien_id').anyOf(phienIdsArr)
+      .filter(r => r.ma_vt === ma_vt && r.ma_kho === ma_kho)
+      .toArray()
+    if (navigator.onLine) {
+      await supabase.from('kiem_ke_chitiet')
+        .delete()
+        .eq('ma_vt', ma_vt)
+        .eq('ma_kho', ma_kho)
+        .in('phien_id', phienIdsArr)
+      for (const r of rows) await db.chitiet.delete(r.id)
+    } else {
+      for (const r of rows) await deleteChiTiet(r.id)
+    }
+    setXoaHetSaving(false)
+    setConfirmXoaHet(false)
+    openMiniKiemKe(thuaThieuDetail.phienIds)
+    loadData()
+  }
 
   // ── Sub-screen render ────────────────────────────────────────────
   if (detailItem) {
@@ -1094,7 +1185,7 @@ export default function BaoCao({ currentUser }) {
               </tbody>
             </table>
           )
-        ) : loading ? (
+        ) : (loading || (tab === 'thua_thieu' && loadingTonKho)) ? (
           <div className="empty-state">Đang tải...</div>
 
         ) : tab === 'so_sanh' ? (
@@ -1160,9 +1251,11 @@ export default function BaoCao({ currentUser }) {
 
         ) : displayDataFinal.length === 0 ? (
           <div className="empty-state">
-            {data.length === 0
-              ? 'Dùng bộ lọc để chọn ngày, kho, kế toán, thủ kho cần xem'
-              : tab === 'thua_thieu' ? 'Không có hàng thừa/thiếu ✓' : 'Không tìm thấy vật tư khớp'}
+            {tab === 'thua_thieu'
+              ? 'Chưa có mặt hàng nào trong sổ sách (tồn kho)'
+              : data.length === 0
+                ? 'Dùng bộ lọc để chọn ngày, kho, kế toán, thủ kho cần xem'
+                : 'Không tìm thấy vật tư khớp'}
           </div>
         ) : tab === 'thua_thieu' ? (
           <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
@@ -1194,7 +1287,7 @@ export default function BaoCao({ currentUser }) {
             <tbody>
               {pageDisplayDataFinal.map((row, i) => {
                 const cl = parseFloat(row.chenh_lech)
-                const bg = isNaN(cl) ? '#fff' : cl < 0 ? '#FEF2F2' : '#F0FDF4'
+                const bg = isNaN(cl) ? '#fff' : cl < 0 ? '#FEF2F2' : cl > 0 ? '#FFFBEB' : '#F0FDF4'
                 const tdStyle = { padding: '7px 4px', borderBottom: '1px solid #F3F4F6', background: bg, verticalAlign: 'middle' }
                 const dvtChinh = dvtMap[vtDvtChinhMap[row.ma_vt]] || vtDvtChinhMap[row.ma_vt] || ''
                 const tenKho = khoMap[row.ma_kho] || row.ma_kho || ''
@@ -1202,70 +1295,149 @@ export default function BaoCao({ currentUser }) {
                 const maPhien = phienIds.length === 1
                   ? '#' + phienIds[0].slice(-4).toUpperCase()
                   : phienIds.length > 1 ? `${phienIds.length} phiên` : ''
-                return (
-                  <tr key={i}>
-                    <td style={{ ...tdStyle }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.3 }}>{row.ten_vt}</div>
-                      {(tenKho || maPhien) && (
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {[tenKho, maPhien].filter(Boolean).join(' · ')}
-                        </div>
+                const clColor = isNaN(cl) ? 'inherit' : cl < 0 ? '#DC2626' : cl > 0 ? '#D97706' : '#16A34A'
+                const trangThai = isNaN(cl) ? '' : cl < 0 ? 'Thiếu' : cl > 0 ? 'Thừa' : 'Khớp'
+                const trangThaiColor = isNaN(cl) ? '' : cl < 0 ? '#DC2626' : cl > 0 ? '#D97706' : '#16A34A'
+                return (() => {
+                    const rowKey = `${row.ma_vt}__${row.ma_kho}`
+                    const isSelected = thuaThieuDetail && `${thuaThieuDetail.ma_vt}__${thuaThieuDetail.ma_kho}` === rowKey
+                    return <>
+                      <tr key={`r-${i}`} style={{ cursor: 'pointer' }}
+                        onClick={() => setThuaThieuDetail(isSelected ? null : row)}>
+                        <td style={{ ...tdStyle }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', whiteSpace: 'nowrap' }}>{row.ma_vt}</span>
+                            {trangThai && <span style={{ fontSize: 10, fontWeight: 700, color: trangThaiColor, flexShrink: 0 }}>· {trangThai}</span>}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text)', lineHeight: 1.3 }}>{row.ten_vt}</div>
+                          {(tenKho || maPhien) && (
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {[tenKho, maPhien].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)' }}>{dvtChinh}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
+                          {row.so_luong_quy_doi != null ? fmtSL(row.so_luong_quy_doi) : '—'}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
+                          {row.so_luong_so_sach != null ? fmtSL(row.so_luong_so_sach) : '—'}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13, color: clColor }}>
+                          {!isNaN(cl) ? (cl > 0 ? '+' : '') + fmtSL(cl) : '—'}
+                        </td>
+                      </tr>
+                      {isSelected && (
+                        <tr key={`a-${i}`}>
+                          <td colSpan={5} style={{ padding: '4px 8px 8px', background: '#F9FAFB', borderBottom: '2px solid var(--border)' }}>
+                            <div style={{ display: 'flex', gap: 16 }}>
+                              <span onClick={e => { e.stopPropagation(); openMiniKiemKe(row.phienIds) }}
+                                style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '2px 0' }}>
+                                + Kiểm kê
+                              </span>
+                              <span onClick={e => { e.stopPropagation(); setConfirmXoaHet(true) }}
+                                style={{ fontSize: 12, fontWeight: 600, color: '#DC2626', cursor: 'pointer', padding: '2px 0' }}>
+                                Xóa hết nhập lại
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)' }}>
-                      {dvtChinh}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
-                      {row.so_luong_quy_doi != null ? fmtSL(row.so_luong_quy_doi) : '—'}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
-                      {row.so_luong_so_sach != null ? fmtSL(row.so_luong_so_sach) : '—'}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13,
-                      color: isNaN(cl) ? 'inherit' : cl < 0 ? '#DC2626' : '#16A34A' }}>
-                      {!isNaN(cl) ? (cl > 0 ? '+' : '') + fmtSL(cl) : '—'}
-                    </td>
-                  </tr>
-                )
+                    </>
+                  })()
               })}
             </tbody>
           </table>
         ) : (
-          <table style={{ borderCollapse: 'collapse', fontSize: 12, whiteSpace: 'nowrap', width: '100%' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '40%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '6%' }} />
+            </colgroup>
             <thead>
               <tr>
-                {cols.map(c => (
-                  <th key={c.label} style={{
-                    padding: '8px 12px', background: '#1D9E75', color: '#fff',
-                    fontWeight: 600, textAlign: 'left', position: 'sticky', top: 0, zIndex: 1
-                  }}>{c.label}</th>
+                {[
+                  { l: 'Mã / Tên VT', center: false },
+                  { l: 'SL thực tế',  center: true  },
+                  { l: 'ĐVT phụ',     center: true  },
+                  { l: '×HS',         center: true  },
+                  { l: 'SL quy đổi',  center: true  },
+                  { l: 'ĐVT chính',   center: true  },
+                ].map(c => (
+                  <th key={c.l} style={{
+                    padding: '6px 4px', background: '#1D9E75', color: '#fff',
+                    fontWeight: 600, fontSize: 10, lineHeight: 1.3,
+                    textAlign: c.center ? 'center' : 'left',
+                    verticalAlign: 'middle',
+                    position: 'sticky', top: 0, zIndex: 1
+                  }}>{c.l}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {pageDisplayDataFinal.map((row, i) => {
-                const rowBg  = (pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB'
-                return (
-                  <tr key={i} style={{ background: rowBg, cursor: 'pointer' }}
-                    onClick={() => openDetail(row)}>
-                    {cols.map(c => {
-                      const val    = c.get(row, pageStart + i)
-                      const isLech = c.label === 'Lệch KT-SS/TK-SS'
-                      const num    = parseFloat(val)
-                      return (
-                        <td key={c.label} style={{
-                          padding: '7px 12px', borderBottom: '1px solid #F3F4F6',
-                          textAlign: typeof val === 'number' ? 'right' : 'left',
-                          color: isLech && !isNaN(num) ? (num < 0 ? '#DC2626' : num > 0 ? '#16A34A' : 'inherit') : 'inherit',
-                          fontWeight: isLech && !isNaN(num) && num !== 0 ? 600 : 400,
-                        }}>
-                          {isLech && !isNaN(num) && num > 0 ? '+' : ''}{val}
-                        </td>
-                      )
-                    })}
+                const rowBg      = (pageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB'
+                const isSelected = kiemKeSelected?.id === row.id
+                const dvtPhu     = row.ma_dvt_kiem || ''
+                const dvtChinh   = dvtMap[vtDvtChinhMap[row.ma_vt]] || vtDvtChinhMap[row.ma_vt] || ''
+                const hs         = row.he_so_quy_doi ?? 1
+                const tenKho     = row.dm_kho?.ten_kho || row.ma_kho || row.phien_kiem_ke?.dm_kho?.ten_kho || row.phien_kiem_ke?.ma_kho || ''
+                const maPhien    = row.phien_id ? '#' + row.phien_id.slice(-4).toUpperCase() : ''
+                const thoiGian   = row.created_at ? (() => {
+                  const d = new Date(row.created_at)
+                  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+                })() : ''
+                const metaSub = [maPhien, row._nguoi_nhap, thoiGian].filter(Boolean).join(' · ')
+                const bg = isSelected ? '#EFF6FF' : rowBg
+                const td = { background: bg, verticalAlign: 'middle', padding: '8px 4px', borderBottom: isSelected ? 'none' : '1px solid #F3F4F6' }
+                return <>
+                  <tr key={`r-${i}`} style={{ cursor: 'pointer' }} onClick={() => setKiemKeSelected(isSelected ? null : row)}>
+                    <td style={{ ...td, padding: '8px 4px 8px 10px' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ma_vt}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.ten_vt}</div>
+                      {tenKho && <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{tenKho}</div>}
+                      {metaSub && <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{metaSub}</div>}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center', fontSize: 15, fontWeight: 700 }}>
+                      {fmtSL(row.so_luong_thuc_te)}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                      {dvtPhu}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                      ×{fmtSL(hs)}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1d9e75' }}>
+                      {row.so_luong_quy_doi != null ? fmtSL(row.so_luong_quy_doi) : '—'}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                      {dvtChinh}
+                    </td>
                   </tr>
-                )
+                  {isSelected && (
+                    <tr key={`a-${i}`}>
+                      <td style={{ padding: '4px 10px 9px', background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }}>
+                        <div style={{ display: 'flex', gap: 16 }}>
+                          <span onClick={e => { e.stopPropagation(); openDetail(row, false) }}
+                            style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer' }}>Xem</span>
+                          <span onClick={e => { e.stopPropagation(); openDetail(row, true) }}
+                            style={{ fontSize: 12, fontWeight: 600, color: '#D97706', cursor: 'pointer' }}>Sửa</span>
+                          <span onClick={e => { e.stopPropagation(); setConfirmXoaKiemKe(true) }}
+                            style={{ fontSize: 12, fontWeight: 600, color: '#DC2626', cursor: 'pointer' }}>Xóa</span>
+                        </div>
+                      </td>
+                      <td style={{ background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }} />
+                      <td style={{ background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }} />
+                      <td style={{ background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }} />
+                      <td style={{ background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }} />
+                      <td style={{ background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }} />
+                    </tr>
+                  )}
+                </>
               })}
             </tbody>
           </table>
@@ -1417,6 +1589,106 @@ export default function BaoCao({ currentUser }) {
           </div>
         )
       })()}
+
+      {/* ── Confirm xóa dòng kiểm kê ── */}
+      {confirmXoaKiemKe && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '100%', maxWidth: 360 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Xóa dòng kiểm kê?</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
+              {kiemKeSelected?.ma_vt} · {kiemKeSelected?.ten_vt}
+            </div>
+            <div className="row-2col">
+              <button className="btn-secondary" onClick={() => setConfirmXoaKiemKe(false)} disabled={saving}>Hủy</button>
+              <button className="btn-primary" onClick={handleDeleteKiemKe} disabled={saving}
+                style={{ background: '#DC2626', borderColor: '#DC2626' }}>
+                {saving ? 'Đang xóa...' : 'Xóa'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirm xóa hết ── */}
+      {confirmXoaHet && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '100%', maxWidth: 360 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Xóa hết nhập lại?</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
+              Xóa hết số lượng kiểm kê của mặt hàng này và nhập lại số đúng cuối cùng?
+            </div>
+            <div className="row-2col">
+              <button className="btn-secondary" onClick={() => setConfirmXoaHet(false)} disabled={xoaHetSaving}>Hủy</button>
+              <button className="btn-primary" onClick={handleXoaHet} disabled={xoaHetSaving}
+                style={{ background: '#DC2626', borderColor: '#DC2626' }}>
+                {xoaHetSaving ? 'Đang xóa...' : 'Xác nhận'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Phiên picker (nhiều phiên cùng user) ── */}
+      {showPhienPicker && thuaThieuDetail && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Chọn phiên kiểm kê</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{thuaThieuDetail.ma_vt} · {thuaThieuDetail.ten_vt}</div>
+            <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>Chọn 1 lần, app sẽ nhớ cho các lần bấm sau.</div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {phienPickerCandidates.map(id => {
+              const p = phienList.find(p => p.id === id)
+              if (!p) return null
+              const isMine = p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id
+              const kt = userMap[p.ke_toan_id]?.ho_ten || '?'
+              const tk = userMap[p.thu_kho_id]?.ho_ten || '?'
+              return (
+                <div key={id} onClick={() => { setMiniKiemKePhienId(id); setRememberedPhienId(id); setShowPhienPicker(false); setShowMiniKiemKe(true) }}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', background: isMine ? '#F0FDF4' : '#fff' }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>
+                    {p.ngay_kiem} · #{id.slice(-4).toUpperCase()}
+                    {isMine && <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--green)', fontWeight: 700 }}>● Phiên của bạn</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {khoMap[p.ma_kho] || p.ma_kho} · KT: {kt} · TK: {tk}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
+            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowPhienPicker(false)}>Hủy</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── MiniKiemKe ── */}
+      {showMiniKiemKe && thuaThieuDetail && miniKiemKePhienId && (
+        <MiniKiemKe
+          vt={{ ma_vt: thuaThieuDetail.ma_vt, ten_vt: thuaThieuDetail.ten_vt }}
+          initKho={thuaThieuDetail.ma_kho}
+          soSachInit={thuaThieuDetail.so_luong_so_sach}
+          phienId={miniKiemKePhienId}
+          phienInfo={(() => {
+            const p = phienList.find(x => x.id === miniKiemKePhienId)
+            if (!p) return null
+            return {
+              label: `${p.ngay_kiem.split('-').reverse().join('/')} · #${miniKiemKePhienId.slice(-4).toUpperCase()}`,
+              kt: userMap[p.ke_toan_id]?.ho_ten || '',
+              tk: userMap[p.thu_kho_id]?.ho_ten || '',
+            }
+          })()}
+          currentUser={currentUser}
+          khoList={khoList}
+          danhMucDvt={danhMucDvt}
+          dvtChinhMap={vtDvtChinhMap}
+          dvtMap={dvtMap}
+          onHuy={() => { setShowMiniKiemKe(false); setMiniKiemKePhienId(null); setThuaThieuDetail(null) }}
+          onSaved={loadData}
+          onDoiPhien={phienPickerCandidates.length > 1 ? () => { setShowMiniKiemKe(false); setShowPhienPicker(true) } : undefined}
+        />
+      )}
 
       {toastMsg && (
         <div style={{
