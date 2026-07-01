@@ -23,6 +23,15 @@ export default function Admin() {
   const [editUser, setEditUser] = useState(null)
   const [userForm, setUserForm] = useState({ ma_user: '', ho_ten: '', role: 'ke_toan', email: '', password: '' })
   const [savingUser, setSavingUser] = useState(false)
+  const [keyboardOffset, setKeyboardOffset] = useState(0)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKeyboardOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
   const [deletingId, setDeletingId] = useState(null)
   const [selectedUserId, setSelectedUserId] = useState(null)
   const [confirmDeleteFiltered, setConfirmDeleteFiltered] = useState(false)
@@ -233,13 +242,23 @@ export default function Admin() {
               placeholder={editUser ? 'Để trống nếu không đổi' : '••••••'} />
           </div>
 
-          <div className="row-2col" style={{ marginTop: 8 }}>
+        </div>
+
+        {/* Footer — Visual Viewport API */}
+        <div style={{
+          position: 'fixed', bottom: keyboardOffset > 0 ? keyboardOffset : 56, zIndex: 10,
+          left: 'max(0px, calc((100vw - 480px) / 2))',
+          right: 'max(0px, calc((100vw - 480px) / 2))',
+          padding: '8px 16px 16px',
+          borderTop: '1px solid var(--border)', background: '#fff',
+          transition: 'bottom 0.15s ease-out'
+        }}>
+          <div className="row-2col">
             <button className="btn-secondary" onClick={closeForm} disabled={savingUser}>Hủy</button>
             <button className="btn-primary" onClick={handleSaveUser} disabled={savingUser}>
               {savingUser ? 'Đang lưu...' : editUser ? 'Lưu thay đổi' : 'Tạo người dùng'}
             </button>
           </div>
-
         </div>
       </div>
     )

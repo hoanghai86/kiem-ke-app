@@ -1,5 +1,5 @@
 // src/screens/Account.jsx
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
 
@@ -10,6 +10,15 @@ export default function Account({ currentUser, onUpdate }) {
   const [password, setPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg]     = useState(null) // { type: 'ok'|'err', text }
+  const [keyboardOffset, setKeyboardOffset] = useState(0)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKeyboardOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
 
   async function handleSave() {
     if (!ho_ten.trim()) { setMsg({ type: 'err', text: 'Họ tên không được để trống' }); return }
@@ -107,8 +116,18 @@ export default function Account({ currentUser, onUpdate }) {
             placeholder="Tối thiểu 6 ký tự" />
         </div>
 
-        <button className="btn-primary" onClick={handleSave} disabled={saving}
-          style={{ width: '100%', marginTop: 8 }}>
+      </div>
+
+      {/* Footer — Visual Viewport API */}
+      <div style={{
+        position: 'fixed', bottom: keyboardOffset > 0 ? keyboardOffset : 56, zIndex: 10,
+        left: 'max(0px, calc((100vw - 480px) / 2))',
+        right: 'max(0px, calc((100vw - 480px) / 2))',
+        padding: '8px 16px 16px',
+        borderTop: '1px solid var(--border)', background: '#fff',
+        transition: 'bottom 0.15s ease-out'
+      }}>
+        <button className="btn-primary" onClick={handleSave} disabled={saving} style={{ width: '100%' }}>
           {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
         </button>
       </div>

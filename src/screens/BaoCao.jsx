@@ -80,6 +80,15 @@ export default function BaoCao({ currentUser }) {
   // Sub-screen edit state
   const [detailItem, setDetailItem] = useState(null)
   const [editMode, setEditMode]     = useState(false)
+  const [keyboardOffset, setKeyboardOffset] = useState(0)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKeyboardOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
   const [form, setForm]             = useState({})
   const [saving, setSaving]         = useState(false)
 
@@ -648,13 +657,14 @@ export default function BaoCao({ currentUser }) {
 
         </div>
 
-        {/* Footer fixed — đè lên BottomNav (z-index 50), trên bàn phím khi keyboard mở */}
+        {/* Footer fixed — Visual Viewport API đẩy lên trên bàn phím */}
         <div style={{
-          position: 'fixed', bottom: 0, zIndex: 55,
-          left: '50%', transform: 'translateX(-50%)',
-          width: '100%', maxWidth: 480,
+          position: 'fixed', bottom: keyboardOffset > 0 ? keyboardOffset : 56, zIndex: 55,
+          left: 'max(0px, calc((100vw - 480px) / 2))',
+          right: 'max(0px, calc((100vw - 480px) / 2))',
           padding: '10px 16px',
-          borderTop: '1px solid var(--border)', background: '#fff'
+          borderTop: '1px solid var(--border)', background: '#fff',
+          transition: 'bottom 0.15s ease-out'
         }}>
           {!editMode && canEdit && (
             <button onClick={handleDelete} disabled={saving} style={{

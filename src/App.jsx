@@ -298,7 +298,7 @@ function BottomNav({ role }) {
   const path = location.pathname
 
   // Ẩn trên màn hình task để nhường chỗ cho footer buttons (giống AppSheet)
-  if (path.includes('/dem-lai/') || path.includes('/tong-hop/')) return null
+  if (path.includes('/dem-lai/') || path.includes('/tong-hop/') || path.includes('/kiem-ke/')) return null
 
   return (
     <div className="bottom-nav">

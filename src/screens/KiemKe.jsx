@@ -53,6 +53,17 @@ export default function KiemKe({ currentUser }) {
   const [checkedIds, setCheckedIds] = useState(new Set())
   const [confirmDeleteChecked, setConfirmDeleteChecked] = useState(false)
 
+  // Visual Viewport API — đẩy footer lên trên bàn phím
+  const [keyboardOffset, setKeyboardOffset] = useState(0)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKeyboardOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
+
   // Kho fullscreen modal
   const [openKhoModal, setOpenKhoModal] = useState(false)
   const [khoQuery, setKhoQuery] = useState('')
@@ -406,21 +417,17 @@ export default function KiemKe({ currentUser }) {
       : vtInDanhSach
 
     return (
-      <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+      <div className="screen" style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', paddingBottom: 0 }}>
         <div className="topbar">
           <div className="topbar-title">Danh sách đã nhập</div>
           <div className="topbar-sub">{danhSachLoc.length}/{danhSach.length} dòng · Lượt {luotKiem}</div>
         </div>
 
-        {/* Toolbar */}
-        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: '#fff', display: 'flex', gap: 8 }}>
+        {/* Toolbar — chỉ Quay lại, full width */}
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', background: '#fff', flexShrink: 0 }}>
           <button className="btn-secondary" onClick={() => { setXemDanhSach(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false) }}
-            style={{ flex: 1, color: 'var(--green-dark)', borderColor: 'var(--green)', fontWeight: 600, height: 36 }}>
+            style={{ width: '100%', color: 'var(--green-dark)', borderColor: 'var(--green)', fontWeight: 600, height: 36 }}>
             ← Quay lại
-          </button>
-          <button className="btn-filter-toggle" onClick={() => setShowListFilter(v => !v)}
-            style={{ height: 36 }}>
-            Lọc {hasFilter ? '●' : ''}{showListFilter ? ' ▲' : ' ▼'}
           </button>
         </div>
 
@@ -510,29 +517,37 @@ export default function KiemKe({ currentUser }) {
 
         {/* Danh sách */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '0 16px' }}>
-          {danhSachLoc.length === 0 && (
-            <div className="empty-state">{hasFilter ? 'Không có kết quả phù hợp' : 'Chưa có dòng nào được nhập'}</div>
-          )}
-          {danhSachLoc.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '2px solid var(--border)' }}>
-              <input type="checkbox"
-                checked={danhSachLoc.every(r => checkedIds.has(r.id))}
-                onChange={e => {
-                  if (e.target.checked) setCheckedIds(new Set(danhSachLoc.map(r => r.id)))
-                  else setCheckedIds(new Set())
-                }}
-                style={{ marginRight: 10 }} />
-              <span
-                onClick={() => {
-                  const allChecked = danhSachLoc.every(r => checkedIds.has(r.id))
-                  if (allChecked) setCheckedIds(new Set())
-                  else setCheckedIds(new Set(danhSachLoc.map(r => r.id)))
-                }}
-                style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                Chọn tất cả ({danhSachLoc.length})
+          {/* Header: Chọn tất cả + Lọc (luôn hiển thị) */}
+          <div style={{ display: 'flex', alignItems: 'center', padding: '8px 0', borderBottom: '2px solid var(--border)' }}>
+            {danhSachLoc.length > 0 ? (
+              <>
+                <input type="checkbox"
+                  checked={danhSachLoc.every(r => checkedIds.has(r.id))}
+                  onChange={e => {
+                    if (e.target.checked) setCheckedIds(new Set(danhSachLoc.map(r => r.id)))
+                    else setCheckedIds(new Set())
+                  }}
+                  style={{ marginRight: 10 }} />
+                <span
+                  onClick={() => {
+                    const allChecked = danhSachLoc.every(r => checkedIds.has(r.id))
+                    if (allChecked) setCheckedIds(new Set())
+                    else setCheckedIds(new Set(danhSachLoc.map(r => r.id)))
+                  }}
+                  style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  Chọn tất cả ({danhSachLoc.length})
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>
+                {hasFilter ? 'Không có kết quả phù hợp' : 'Chưa có dòng nào được nhập'}
               </span>
-            </div>
-          )}
+            )}
+            <button className="btn-filter-toggle" onClick={() => setShowListFilter(v => !v)}
+              style={{ marginLeft: 'auto', height: 30, fontSize: 13, flexShrink: 0 }}>
+              Lọc {hasFilter ? '●' : ''}{showListFilter ? ' ▲' : ' ▼'}
+            </button>
+          </div>
           {danhSachLoc.map(item => (
             <div key={item.id}
               onClick={() => setCheckedIds(prev => {
@@ -564,9 +579,31 @@ export default function KiemKe({ currentUser }) {
           ))}
         </div>
 
+        {/* Bottom nav inline — không dùng class bottom-nav vì nó position:fixed */}
+        <div style={{ flexShrink: 0, background: '#fff', borderTop: '1px solid var(--border)', display: 'flex' }}>
+          <button className="nav-item active" onClick={() => navigate('/', { state: { refresh: Date.now() } })}>
+            <span className="nav-icon">🏠</span>
+            <span>Phiên KK</span>
+          </button>
+          <button className="nav-item" onClick={() => navigate('/bao-cao')}>
+            <span className="nav-icon">📊</span>
+            <span>Báo cáo</span>
+          </button>
+          <button className="nav-item" onClick={() => navigate('/import')}>
+            <span className="nav-icon">📥</span>
+            <span>Import</span>
+          </button>
+          {currentUser?.role === 'admin' && (
+            <button className="nav-item" onClick={() => navigate('/admin')}>
+              <span className="nav-icon">⚙️</span>
+              <span>Admin</span>
+            </button>
+          )}
+        </div>
+
         {/* Edit modal */}
         {editItem && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'flex-end' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'flex-end', paddingBottom: keyboardOffset }}>
             <div style={{ background: '#fff', width: '100%', maxWidth: 480, margin: '0 auto', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', maxHeight: '90dvh' }}>
               {/* Header cố định */}
               <div style={{ padding: '20px 16px 4px', flexShrink: 0 }}>
@@ -1050,12 +1087,17 @@ export default function KiemKe({ currentUser }) {
 
       </div>
 
-      {/* Footer sticky — bám sát cuối content, không chừa khoảng trắng khi content ngắn */}
+      {/* Footer — Visual Viewport API đẩy lên trên bàn phím */}
       <div style={{
-        position: 'sticky', bottom: 0, zIndex: 10,
+        position: 'fixed',
+        bottom: keyboardOffset,
+        left: 'max(0px, calc((100vw - 480px) / 2))',
+        right: 'max(0px, calc((100vw - 480px) / 2))',
+        zIndex: 10,
         display: 'flex', gap: 8,
-        padding: '8px 16px',
-        borderTop: '1px solid var(--border)', background: '#fff'
+        padding: '8px 16px 16px',
+        borderTop: '1px solid var(--border)', background: '#fff',
+        transition: 'bottom 0.15s ease-out'
       }}>
         <button className="btn-secondary" onClick={() => navigate('/')} style={{ flex: 1, height: 40 }}>
           Hủy
@@ -1072,7 +1114,7 @@ export default function KiemKe({ currentUser }) {
 
       {/* Edit modal — dùng chung cho cả preview rows và xemDanhSach */}
       {editItem && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'flex-end' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 100, display: 'flex', alignItems: 'flex-end', paddingBottom: keyboardOffset }}>
           <div style={{ background: '#fff', width: '100%', maxWidth: 480, margin: '0 auto', borderRadius: '16px 16px 0 0', display: 'flex', flexDirection: 'column', maxHeight: '90dvh' }}>
             <div style={{ padding: '20px 16px 4px', flexShrink: 0 }}>
               <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>

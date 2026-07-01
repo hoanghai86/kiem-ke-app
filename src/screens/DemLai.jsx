@@ -62,6 +62,15 @@ export default function DemLai({ currentUser }) {
   const [editMode, setEditMode] = useState(false)
   const [form, setForm] = useState({})
   const [saving, setSaving] = useState(false)
+  const [keyboardOffset, setKeyboardOffset] = useState(0)
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const update = () => setKeyboardOffset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update) }
+  }, [])
   const [roleMap, setRoleMap] = useState({})
 
   useEffect(() => { load() }, [phienId])
@@ -252,6 +261,30 @@ export default function DemLai({ currentUser }) {
     return `${fmtSL(sl * hs)} ${tenChinh}`
   })()
 
+  const bottomNav = (
+    <div style={{
+      position: 'fixed', bottom: 0, zIndex: 50,
+      left: 'max(0px, calc((100vw - 480px) / 2))',
+      right: 'max(0px, calc((100vw - 480px) / 2))',
+      background: '#fff', borderTop: '1px solid var(--border)', display: 'flex'
+    }}>
+      <button className="nav-item active" onClick={() => navigate('/', { state: { refresh: Date.now() } })}>
+        <span className="nav-icon">🏠</span><span>Phiên KK</span>
+      </button>
+      <button className="nav-item" onClick={() => navigate('/bao-cao')}>
+        <span className="nav-icon">📊</span><span>Báo cáo</span>
+      </button>
+      <button className="nav-item" onClick={() => navigate('/import')}>
+        <span className="nav-icon">📥</span><span>Import</span>
+      </button>
+      {currentUser?.role === 'admin' && (
+        <button className="nav-item" onClick={() => navigate('/admin')}>
+          <span className="nav-icon">⚙️</span><span>Admin</span>
+        </button>
+      )}
+    </div>
+  )
+
   // ── CẤP 3: EDIT / XEM TỪNG RECORD ───────────────────────────────────
   if (detailItem) {
     return (
@@ -306,6 +339,17 @@ export default function DemLai({ currentUser }) {
                   placeholder="Nhập ghi chú..." />
               : <div className="input-readonly">{detailItem.ghi_chu || '—'}</div>}
           </div>
+        </div>
+
+        {/* Footer — Visual Viewport API */}
+        <div style={{
+          position: 'fixed', bottom: keyboardOffset > 0 ? keyboardOffset : 56, zIndex: 10,
+          left: 'max(0px, calc((100vw - 480px) / 2))',
+          right: 'max(0px, calc((100vw - 480px) / 2))',
+          padding: '8px 16px 16px',
+          borderTop: '1px solid var(--border)', background: '#fff',
+          transition: 'bottom 0.15s ease-out'
+        }}>
           <div className="row-2col">
             <button className="btn-secondary" onClick={closeDetail} disabled={saving}>Hủy</button>
             {editMode
@@ -315,6 +359,7 @@ export default function DemLai({ currentUser }) {
               : <button className="btn-primary" onClick={() => setEditMode(true)}>Sửa</button>}
           </div>
         </div>
+        {bottomNav}
       </div>
     )
   }
@@ -335,6 +380,7 @@ export default function DemLai({ currentUser }) {
           <div className="content">
             <div className="empty-state">Không còn dữ liệu</div>
           </div>
+        {bottomNav}
         </div>
       )
     }
@@ -434,6 +480,7 @@ export default function DemLai({ currentUser }) {
             ))
           )}
         </div>
+      {bottomNav}
       </div>
     )
   }
@@ -650,6 +697,7 @@ export default function DemLai({ currentUser }) {
           })
         )}
       </div>
+      {bottomNav}
     </div>
   )
 }
