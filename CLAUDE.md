@@ -77,3 +77,32 @@ Three roles enforced in both RLS and UI: `ke_toan`, `thu_kho`, `admin`. Admin-on
 
 ## Language
 Always respond in Vietnamese.
+
+## Handover — 2026-07-01
+
+### DanhMuc.jsx — hoàn thành
+- Accordion 4 tab (Kho / DVT / Vật tư / Tồn kho): đổi nút thành **Xem / Sửa / Xóa** (bỏ "Tạm ẩn")
+- Chế độ **Xem**: hiển thị read-only label/value, ẩn toàn bộ input và checkbox "Đang hoạt động"
+- Chế độ **Sửa**: giữ nguyên form, có checkbox "Đang hoạt động"
+
+### BaoCao.jsx — tab Kiểm kê — hoàn thành
+Bảng kết quả 6 cột (`tableLayout: fixed`, `width: 100%`):
+
+| Cột | Header | colgroup width | Style data |
+|-----|--------|---------------|-----------|
+| 1 | Mã / Tên VT | 40% | 4 dòng: mã (12px bold #1d9e75) → tên (11px) → kho (10px muted) → meta (10px muted) |
+| 2 | SL thực tế | 15% | 15px bold, center |
+| 3 | ĐVT phụ | 6% | 10px muted, center |
+| 4 | ×HS | 6% | 10px muted, center |
+| 5 | SL quy đổi | 15% | 15px bold #1d9e75, center |
+| 6 | ĐVT chính | 6% | 10px muted, center |
+
+- Header: wrap tự nhiên (không `whiteSpace: nowrap`), canh giữa các cột số
+- Mỗi mục **1 hàng duy nhất** — không dùng 2-row-per-item, không dùng `colSpan`
+- Click hàng → accordion inline Xem / Sửa / Xóa
+- `metaSub` = `[maPhien, row._nguoi_nhap, thoiGian].join(' · ')` (kho tách dòng riêng)
+- **Không dùng** `maxWidth: 0` trên td (ẩn hết nội dung trong Chrome)
+
+### MiniKiemKe.jsx — chưa tích hợp
+- File `src/components/MiniKiemKe.jsx` đã commit nhưng chưa được import/dùng ở đâu
+- Cần hỏi người dùng muốn dùng component này ở màn hình nào trước khi tích hợp
