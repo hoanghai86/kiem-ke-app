@@ -11,29 +11,65 @@ import { invalidateVatTuIndex } from './vatTuSearch'
 // -----------------------------------------------
 // Pull danh mục từ Supabase xuống IndexedDB
 // -----------------------------------------------
-async function fetchAllVatTu() {
+// Tải toàn bộ dm_vat_tu (40k+ dòng) theo từng lô CONCURRENCY trang cùng lúc thay vì tuần tự
+// từng trang một — vẫn tải đủ 100% dữ liệu (bắt buộc để dùng offline lúc kiểm kê), chỉ nhanh
+// hơn nhiều lần (VD ~43 trang tuần tự ~21s → 8 trang/lô ~6 lô ≈ vài giây).
+async function fetchAllVatTu(onProgress) {
   const PAGE = 1000
-  let all = []
-  let from = 0
-  while (true) {
-    const { data, error } = await supabase
-      .from('dm_vat_tu').select('*').eq('active', true)
-      .range(from, from + PAGE - 1)
-    if (error) return { data: null, error }
-    all = all.concat(data)
-    if (data.length < PAGE) break
-    from += PAGE
+  const CONCURRENCY = 8
+
+  const { count, error: countErr } = await supabase
+    .from('dm_vat_tu').select('*', { count: 'exact', head: true }).eq('active', true)
+  if (countErr) return { data: null, error: countErr }
+  if (!count) return { data: [], error: null }
+
+  const totalPages = Math.ceil(count / PAGE)
+  const pageStarts = Array.from({ length: totalPages }, (_, i) => i * PAGE)
+  const pages = new Array(totalPages)
+  let loaded = 0
+
+  for (let i = 0; i < pageStarts.length; i += CONCURRENCY) {
+    const batch = pageStarts.slice(i, i + CONCURRENCY)
+    const batchResults = await Promise.all(batch.map(from =>
+      supabase.from('dm_vat_tu').select('*').eq('active', true).range(from, from + PAGE - 1)
+    ))
+    for (let j = 0; j < batchResults.length; j++) {
+      const { data, error } = batchResults[j]
+      if (error) return { data: null, error }
+      pages[i + j] = data
+      loaded += data.length
+    }
+    onProgress?.(Math.min(loaded, count), count)
   }
-  return { data: all, error: null }
+
+  return { data: pages.flat(), error: null }
 }
 
-export async function pullDanhMuc() {
+// Chống chạy chồng — app gọi pullDanhMuc() từ nhiều nơi gần như cùng lúc (App.jsx lúc khởi
+// động + lúc auth đổi, Login.jsx lúc đăng nhập, SyncButton lúc bấm đồng bộ...). Nếu để chạy
+// song song, các lệnh `clear()` + `bulkPut()` của 2 lần gọi sẽ giẫm lên nhau giữa chừng, ra
+// dữ liệu sai/thiếu trong IndexedDB. Gọi chồng lên nhau thì dùng chung 1 lần chạy đang có sẵn.
+let _pulling = null
+
+// onProgress?: (loaded, total) => void — chỉ có tác dụng nếu lần gọi này là lần khởi tạo
+// _pulling (gọi chồng lên 1 lần đang chạy sẵn thì dùng chung kết quả, không có progress riêng).
+export async function pullDanhMuc(onProgress) {
+  if (_pulling) return _pulling
+  _pulling = _doPullDanhMuc(onProgress)
+  try {
+    return await _pulling
+  } finally {
+    _pulling = null
+  }
+}
+
+async function _doPullDanhMuc(onProgress) {
   try {
     const [kho, users, dvt, vatTu, tonKho, goiY] = await Promise.all([
       supabase.from('dm_kho').select('*').eq('active', true),
       supabase.from('dm_user').select('*').eq('active', true),
       supabase.from('dm_dvt').select('*').eq('active', true),
-      fetchAllVatTu(),
+      fetchAllVatTu(onProgress),
       supabase.from('ton_kho').select('*'),
       supabase.from('v_goi_y_vat_tu').select('*').limit(100)
     ])
@@ -43,6 +79,15 @@ export async function pullDanhMuc() {
     if (dvt.error) throw new Error(`dm_dvt: ${dvt.error.message}`)
     if (vatTu.error) throw new Error(`dm_vat_tu: ${vatTu.error.message}`)
     if (tonKho.error) throw new Error(`ton_kho: ${tonKho.error.message}`)
+
+    // Nếu user đăng xuất ngay giữa lúc đang tải (phiên đăng nhập không còn), dữ liệu vừa tải
+    // được là rác (RLS đã chặn giữa chừng, có thể thiếu — vòng lặp phân trang lại tưởng nhầm
+    // là đã hết dữ liệu). Không ghi đè lên cache cục bộ trong trường hợp này.
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session) {
+      console.warn('[Sync] Pull danh mục hủy — không còn phiên đăng nhập (đã đăng xuất giữa chừng)')
+      return { ok: false, error: 'no session' }
+    }
 
     await db.transaction('rw',
       [db.dm_kho, db.dm_user, db.dm_dvt, db.dm_vat_tu, db.ton_kho, db.goi_y_vat_tu],

@@ -1,5 +1,5 @@
 // src/screens/DanhMuc.jsx
-import { useState, useEffect, useRef } from 'react'
+import { Fragment, useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
 import { toSearchable } from '../lib/utils'
@@ -96,30 +96,71 @@ export default function DanhMuc({ inline = false }) {
     },
   }
 
-  useEffect(() => { loadList(); setSearch(''); closeForm(); setSelectedId(null); setDeletingId(null); setConfirmDeleteAll(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false); setInfoMsg(''); setPage(1); setConfirmDeleteFiltered(false) }, [tab])
+  const BIG_TABS = ['vat_tu', 'ton_kho'] // danh mục hàng vạn dòng — tải theo trang, không tải hết
+  const isBigTab = BIG_TABS.includes(tab)
+  const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu', ton_kho: 'ton_kho' }
+  const orderMap = { kho: 'ma_kho', dvt: 'ma_dvt', vat_tu: 'ma_vt', ton_kho: 'ma_kho' }
+  const searchColsMap = { kho: ['ma_kho', 'ten_kho'], dvt: ['ma_dvt', 'ten_dvt'], vat_tu: ['ma_vt', 'ten_vt'], ton_kho: ['ma_vt', 'ten_vt', 'ma_kho'] }
+
+  // Áp bộ lọc tìm kiếm (nhiều từ khóa cách nhau bằng dấu phẩy, OR trên các cột) lên query phía server.
+  function applySearch(q, cols, searchStr) {
+    const terms = searchStr.split(',').map(t => t.trim()).filter(Boolean)
+    if (!terms.length) return q
+    const orExpr = terms.flatMap(t => cols.map(c => `${c}.ilike.%${t}%`)).join(',')
+    return q.or(orExpr)
+  }
+
+  useEffect(() => { setSearch(''); closeForm(); setSelectedId(null); setDeletingId(null); setConfirmDeleteAll(false); setCheckedIds(new Set()); setConfirmDeleteChecked(false); setInfoMsg(''); setPage(1); setConfirmDeleteFiltered(false) }, [tab])
+  // Kho/ĐVT — danh mục nhỏ, tải hết 1 lần cho mượt (lọc/tìm phía client).
+  useEffect(() => { if (tab === 'kho' || tab === 'dvt') loadList() }, [tab])
+  // Vật tư/Tồn kho — danh mục lớn, tải theo trang + tìm kiếm phía server. Debounce khi có từ khóa
+  // để không bắn request liên tục theo từng ký tự gõ.
+  useEffect(() => {
+    if (!isBigTab) return
+    const timer = setTimeout(loadList, search ? 1000 : 0)
+    return () => clearTimeout(timer)
+  }, [tab, page, search])
   useEffect(() => { if (tab === 'vat_tu' || tab === 'ton_kho') loadDvtOptions() }, [tab])
-  useEffect(() => { if (tab === 'ton_kho') { loadVatTuOptions(); loadKhoList() } }, [tab])
+  useEffect(() => { if (tab === 'ton_kho') loadKhoList() }, [tab])
+  // Picker chọn vật tư (dùng khi thêm/sửa Tồn kho) — chỉ tìm khi mở modal và có từ khóa,
+  // không tải sẵn toàn bộ 40k+ vật tư.
+  useEffect(() => {
+    if (!openVtModal) return
+    const q = vtModalQ.trim()
+    if (q.length < 2) { setVatTuOptions([]); return }
+    const timer = setTimeout(() => loadVatTuOptions(q), 1000)
+    return () => clearTimeout(timer)
+  }, [openVtModal, vtModalQ])
 
   async function loadList() {
     setLoading(true)
-    const tableMap = { kho: 'dm_kho', dvt: 'dm_dvt', vat_tu: 'dm_vat_tu', ton_kho: 'ton_kho' }
-    const orderMap = { kho: 'ma_kho', dvt: 'ma_dvt', vat_tu: 'ma_vt', ton_kho: 'ma_kho' }
     const table = tableMap[tab]
     const order = orderMap[tab]
+
+    if (isBigTab) {
+      let q = supabase.from(table).select('*', { count: 'exact' }).order(order)
+      if (tab === 'ton_kho') q = q.order('ma_vt')
+      q = applySearch(q, searchColsMap[tab], search)
+      const from = (page - 1) * PAGE_SIZE
+      const { data, count, error } = await q.range(from, from + PAGE_SIZE - 1)
+      if (error) setErr(error.message)
+      setList(data || [])
+      setTotalCount(count || 0)
+      setLoading(false)
+      return
+    }
+
     const all = []
     let from = 0
     while (true) {
-      let q = supabase.from(table).select('*').order(order)
-      if (tab === 'ton_kho') q = q.order('ma_vt')
-      const { data } = await q.range(from, from + 999)
+      const { data } = await supabase.from(table).select('*').order(order).range(from, from + 999)
       if (!data || data.length === 0) break
       all.push(...data)
       if (data.length < 1000) break
       from += 1000
     }
-    const { count } = await supabase.from(table).select('*', { count: 'exact', head: true })
     setList(all)
-    setTotalCount(count || 0)
+    setTotalCount(all.length)
     setLoading(false)
   }
 
@@ -128,8 +169,12 @@ export default function DanhMuc({ inline = false }) {
     setDvtOptions(data || [])
   }
 
-  async function loadVatTuOptions() {
-    const { data } = await supabase.from('dm_vat_tu').select('ma_vt, ten_vt, ma_dvt_chinh').order('ma_vt')
+  // Danh mục vật tư có hàng vạn dòng — chỉ tìm theo từ khóa gõ vào (giới hạn kết quả), không
+  // tải hết cho picker chọn vật tư (từng gây quá tải mạng khi mở tab Tồn kho).
+  async function loadVatTuOptions(q) {
+    let query = supabase.from('dm_vat_tu').select('ma_vt, ten_vt, ma_dvt_chinh').eq('active', true).order('ma_vt').limit(50)
+    if (q) query = query.or(`ma_vt.ilike.%${q}%,ten_vt.ilike.%${q}%`)
+    const { data } = await query
     setVatTuOptions(data || [])
   }
 
@@ -224,8 +269,8 @@ export default function DanhMuc({ inline = false }) {
       const { error } = await q
       if (error) throw new Error(error.message)
       await loadList()
-      await pullDanhMuc()
       closeForm()
+      pullDanhMuc() // đồng bộ cache offline ở nền — không chờ, tránh treo UI khi danh mục lớn (40k+ dòng)
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -298,7 +343,7 @@ export default function DanhMuc({ inline = false }) {
         if (error) throw new Error(error.message)
       }
       await loadList()
-      await pullDanhMuc()
+      pullDanhMuc() // đồng bộ cache offline ở nền — không chờ
     }
     return { deleted: safe.length, kept: inUseIds.size }
   }
@@ -324,7 +369,7 @@ export default function DanhMuc({ inline = false }) {
       const { error } = await supabase.from(tableMap[tab]).delete().eq('id', id)
       if (error) throw new Error(error.message)
       await loadList()
-      await pullDanhMuc()
+      pullDanhMuc() // đồng bộ cache offline ở nền — không chờ
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -339,21 +384,50 @@ export default function DanhMuc({ inline = false }) {
     setList(prev => prev.map(r => r.id === item.id ? { ...r, active: !item.active } : r))
   }
 
-  function handleExport() {
-    const cfg = TAB_CFG[tab]
-    const data = list.map(r => cfg.getRow(r))
-    const ws = XLSX.utils.aoa_to_sheet([cfg.headers, ...data])
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-    const d = new Date()
-    const dateStr = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`
-    XLSX.writeFile(wb, `DanhMuc_${tab}_${dateStr}.xlsx`)
+  // Danh mục lớn (vat_tu/ton_kho): `list` chỉ đang giữ 1 trang, cần lấy lại toàn bộ dòng khớp
+  // tìm kiếm từ server cho các thao tác hàng loạt (xuất Excel, xóa theo bộ lọc).
+  async function fetchAllForTab(searchStr) {
+    const items = []
+    let from = 0
+    while (true) {
+      let q = supabase.from(tableMap[tab]).select('*').order(orderMap[tab])
+      if (tab === 'ton_kho') q = q.order('ma_vt')
+      q = applySearch(q, searchColsMap[tab], searchStr)
+      const { data } = await q.range(from, from + 999)
+      if (!data || data.length === 0) break
+      items.push(...data)
+      if (data.length < 1000) break
+      from += 1000
+    }
+    return items
   }
 
-  async function handleDeleteFiltered(ids) {
+  async function handleExport() {
     setSaving(true)
     try {
-      const items = list.filter(r => ids.includes(r.id))
+      const cfg = TAB_CFG[tab]
+      const rows = isBigTab ? await fetchAllForTab('') : list
+      const data = rows.map(r => cfg.getRow(r))
+      const ws = XLSX.utils.aoa_to_sheet([cfg.headers, ...data])
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+      const d = new Date()
+      const dateStr = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`
+      XLSX.writeFile(wb, `DanhMuc_${tab}_${dateStr}.xlsx`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDeleteFiltered() {
+    setSaving(true)
+    try {
+      let items
+      if (isBigTab) {
+        items = await fetchAllForTab(search)
+      } else {
+        items = filtered
+      }
       const { deleted, kept } = await bulkDelete(items)
       setConfirmDeleteFiltered(false)
       if (kept === 0) setSearch('')
@@ -368,7 +442,13 @@ export default function DanhMuc({ inline = false }) {
   async function handleDeleteChecked() {
     setSaving(true)
     try {
-      const items = list.filter(r => checkedIds.has(r.id))
+      // Lấy lại dữ liệu mới nhất theo id đã chọn (không dựa vào `list`, vì với danh mục lớn
+      // `list` chỉ giữ 1 trang — các mục đã tick ở trang khác sẽ không còn trong `list`).
+      const items = []
+      for (const b of chunkArr([...checkedIds], BATCH)) {
+        const { data } = await supabase.from(tableMap[tab]).select('*').in('id', b)
+        if (data) items.push(...data)
+      }
       const { deleted, kept } = await bulkDelete(items)
       setCheckedIds(new Set())
       setConfirmDeleteChecked(false)
@@ -413,7 +493,7 @@ export default function DanhMuc({ inline = false }) {
       }
 
       await loadList()
-      await pullDanhMuc()
+      pullDanhMuc() // đồng bộ cache offline ở nền — không chờ
       setConfirmDeleteAll(false)
       if (totalKept > 0) setInfoMsg(`Đã xóa ${totalDeleted} mục. Giữ lại ${totalKept} mục ${tab === 'dvt' ? 'đang được dùng trong danh mục vật tư' : 'vẫn còn dữ liệu kiểm kê hoặc tồn kho'}.`)
     } catch (e) {
@@ -531,25 +611,26 @@ export default function DanhMuc({ inline = false }) {
         }
       }
 
-      await loadList(); await pullDanhMuc()
+      await loadList()
+      pullDanhMuc() // đồng bộ cache offline ở nền — không chờ
     } catch (e) { setErr('Import lỗi: ' + e.message) }
     finally { setImporting(false) }
   }
 
-  // Lọc danh sách theo search — hỗ trợ nhiều từ khóa cách nhau bằng dấu phẩy
+  // Kho/ĐVT (danh mục nhỏ, đã tải hết) — lọc theo search phía client, nhiều từ khóa cách nhau
+  // bằng dấu phẩy. Vật tư/Tồn kho (danh mục lớn) đã được lọc + phân trang sẵn phía server ở
+  // loadList(), nên `list` ở đây chính là 1 trang kết quả, không cần lọc/cắt trang thêm.
   const terms = search.split(',').map(t => toSearchable(t)).filter(Boolean)
-  const filtered = list.filter(r => {
+  const filtered = isBigTab ? list : list.filter(r => {
     if (!terms.length) return true
-    const text = tab === 'kho'     ? `${r.ma_kho} ${r.ten_kho}`
-               : tab === 'dvt'     ? `${r.ma_dvt} ${r.ten_dvt}`
-               : tab === 'ton_kho' ? `${r.ma_vt} ${r.ten_vt} ${r.ma_kho}`
-               : `${r.ma_vt} ${r.ten_vt}`
+    const text = tab === 'kho' ? `${r.ma_kho} ${r.ten_kho}` : `${r.ma_dvt} ${r.ten_dvt}`
     const s = toSearchable(text)
     return terms.some(t => s.includes(t))
   })
+  const resultCount = isBigTab ? totalCount : filtered.length
 
-  const totalPages    = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pagedFiltered = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const totalPages    = isBigTab ? Math.max(1, Math.ceil(totalCount / PAGE_SIZE)) : Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const pagedFiltered  = isBigTab ? list : filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // ── Form sub-screen ──────────────────────────────────────────────
   if (showForm) {
@@ -786,11 +867,11 @@ export default function DanhMuc({ inline = false }) {
                 autoFocus style={{ margin: 0 }} />
             </div>
             <div style={{ flex: 1, overflowY: 'auto' }}>
-              {vatTuOptions
-                .filter(v => !vtModalQ.trim() ||
-                  toSearchable(v.ma_vt).includes(toSearchable(vtModalQ)) ||
-                  toSearchable(v.ten_vt).includes(toSearchable(vtModalQ)))
-                .map(v => (
+              {vtModalQ.trim().length < 2 ? (
+                <div className="empty-state">Gõ ít nhất 2 ký tự để tìm</div>
+              ) : vatTuOptions.length === 0 ? (
+                <div className="empty-state">Không tìm thấy vật tư</div>
+              ) : vatTuOptions.map(v => (
                   <div key={v.ma_vt}
                     onClick={() => {
                       setForm(f => ({ ...f, ma_vt: v.ma_vt, ten_vt: v.ten_vt, ma_dvt: v.ma_dvt_chinh || f.ma_dvt }))
@@ -891,7 +972,7 @@ export default function DanhMuc({ inline = false }) {
           <button className="btn-primary" onClick={openCreate} style={{ flex: 1, fontSize: 13 }}>
             + Thêm
           </button>
-          <button className="btn-secondary" onClick={handleExport} disabled={!list.length} style={{ flex: 1, fontSize: 13 }}>
+          <button className="btn-secondary" onClick={handleExport} disabled={!totalCount || saving} style={{ flex: 1, fontSize: 13 }}>
             ⬇ Export
           </button>
           <button className="btn-secondary" onClick={() => importRef.current?.click()} disabled={importing} style={{ flex: 1, fontSize: 13 }}>
@@ -924,13 +1005,13 @@ export default function DanhMuc({ inline = false }) {
           </div>
         )}
         <input className="input-field" placeholder="Tìm kiếm... (nhiều mã cách nhau bằng dấu phẩy)" value={search}
-          onChange={e => { setSearch(e.target.value); setConfirmDeleteFiltered(false); setPage(1) }} style={{ marginBottom: terms.length && filtered.length ? 6 : 12 }} />
+          onChange={e => { setSearch(e.target.value); setConfirmDeleteFiltered(false); setPage(1) }} style={{ marginBottom: search.trim() && resultCount ? 6 : 12 }} />
 
-        {terms.length > 0 && filtered.length > 0 && (
+        {search.trim().length > 0 && resultCount > 0 && (
           confirmDeleteFiltered ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', marginBottom: 10, borderRadius: 8, background: '#FEF2F2', border: '1px solid #FECACA' }}>
-              <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {filtered.length} mục đang lọc?</span>
-              <button onClick={() => handleDeleteFiltered(filtered.map(r => r.id))} disabled={saving}
+              <span style={{ flex: 1, fontSize: 13, color: '#991B1B', fontWeight: 500 }}>Xóa {resultCount} mục đang lọc?</span>
+              <button onClick={handleDeleteFiltered} disabled={saving}
                 style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#EF4444', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                 {saving ? '...' : 'Xóa'}
               </button>
@@ -941,10 +1022,10 @@ export default function DanhMuc({ inline = false }) {
             </div>
           ) : (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{filtered.length} kết quả</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{resultCount} kết quả</span>
               <button onClick={() => setConfirmDeleteFiltered(true)}
                 style={{ border: 'none', background: 'none', color: '#DC2626', fontSize: 13, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
-                Xóa {filtered.length} mục này
+                Xóa {resultCount} mục này
               </button>
             </div>
           )
@@ -1018,8 +1099,8 @@ export default function DanhMuc({ inline = false }) {
                 const isSel   = selectedId === id
                 const isChk   = checkedIds.has(id)
                 return (
-                  <>
-                    <tr key={id} onClick={() => { setSelectedId(isSel ? null : id); setDeletingId(null) }}
+                  <Fragment key={id}>
+                    <tr onClick={() => { setSelectedId(isSel ? null : id); setDeletingId(null) }}
                       style={{ cursor: 'pointer', opacity: tab === 'ton_kho' || item.active ? 1 : 0.55, background: isSel ? '#F0FDF4' : isChk ? '#FAFFF5' : 'white', borderBottom: '1px solid #F3F4F6' }}>
                       <td style={{ padding: '10px 4px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                         <input type="checkbox" checked={isChk}
@@ -1082,7 +1163,7 @@ export default function DanhMuc({ inline = false }) {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>

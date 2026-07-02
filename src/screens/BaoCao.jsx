@@ -53,18 +53,20 @@ const getToday = () => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 }
 
-const INIT_FILTERS = () => ({
+// Mặc định "Loại dữ liệu" theo role đăng nhập — thủ kho thấy số của mình trước, kế toán/admin
+// thấy số kế toán trước.
+const getInitFilters = (role) => ({
   tuNgay: getToday(), denNgay: getToday(),
-  loaiDuLieu: 'ke_toan',
+  loaiDuLieu: role === 'thu_kho' ? 'thu_kho' : 'ke_toan',
   kho: [], phien: [], keToan: [], thuKho: [], vatTu: [],
 })
 
 export default function BaoCao({ currentUser }) {
   const [tab, setTab]             = useState('kiem_ke')
-  const [f, setF]                 = useState(INIT_FILTERS)
+  const [f, setF]                 = useState(() => getInitFilters(currentUser.role))
   // Bản nháp bộ lọc — chỉnh trong panel "Lọc" không kích hoạt tải dữ liệu ngay (tránh chớp nháy
   // liên tục từng điều kiện một); chỉ áp dụng vào `f` (driver tải dữ liệu) khi bấm "Tìm kiếm".
-  const [draft, setDraft]         = useState(INIT_FILTERS)
+  const [draft, setDraft]         = useState(() => getInitFilters(currentUser.role))
   const [khoList, setKhoList]     = useState([])
   const [phienList, setPhienList] = useState([])
   const [userMap, setUserMap]     = useState({})
@@ -104,6 +106,12 @@ export default function BaoCao({ currentUser }) {
   const [rememberedPhienId, setRememberedPhienId] = useState(null) // nhớ phiên đã chọn trong session
   const [confirmXoaHet, setConfirmXoaHet]     = useState(false)
   const [xoaHetSaving, setXoaHetSaving]       = useState(false)
+  const [showChiTietSS, setShowChiTietSS]     = useState(false)
+  const [chiTietPage, setChiTietPage]         = useState(1)
+  const [warningMsg, setWarningMsg]           = useState(null)
+  const [xoaHetPhienId, setXoaHetPhienId]         = useState(null)
+  const [showXoaHetPicker, setShowXoaHetPicker]   = useState(false)
+  const [xoaHetPickerCandidates, setXoaHetPickerCandidates] = useState([])
 
   // Ngoài sổ sách
   const [nssItems, setNssItems]         = useState([])
@@ -125,6 +133,10 @@ export default function BaoCao({ currentUser }) {
   // Edit ĐVT fullscreen modal — đồng bộ kiểu chọn với màn hình nhập SL kiểm kê
   const [openEditDvtModal, setOpenEditDvtModal] = useState(false)
   const [editDvtQ, setEditDvtQ] = useState('')
+
+  // Edit phiên fullscreen modal — chỉ cho chọn trong các phiên user thuộc về
+  const [openEditPhienModal, setOpenEditPhienModal] = useState(false)
+  const [editPhienQ, setEditPhienQ] = useState('')
 
   // Vật tư filter fullscreen modal
   const [openVatTuModal, setOpenVatTuModal] = useState(false)
@@ -486,7 +498,8 @@ export default function BaoCao({ currentUser }) {
     ? tonKhoRows.filter(r => f.vatTu.includes(r.ma_vt))
     : tonKhoRows
 
-  // So sánh KT vs TK
+  // So sánh KT vs TK — nhóm theo phiên (1 kế toán có thể đối chiếu nhiều thủ kho/phiên khác
+  // nhau cùng lúc, gộp chung theo mã VT sẽ lẫn lộn giữa các phiên) — mỗi dòng ứng với 1 phiên.
   const soSanhRows = (() => {
     if (tab !== 'so_sanh') return []
     const map = {}
@@ -494,13 +507,20 @@ export default function BaoCao({ currentUser }) {
       const p = r.phien_kiem_ke
       if (!p) return
       if (f.vatTu.length > 0 && !f.vatTu.includes(r.ma_vt)) return
-      const key = `${r.phien_id}_${r.ma_vt}`
+      const ma_kho = r.ma_kho || p.ma_kho || null
+      const key = `${r.phien_id}_${r.ma_vt}_${ma_kho}`
       if (!map[key]) {
         map[key] = {
           ma_vt: r.ma_vt, ten_vt: r.ten_vt, ma_dvt: r.ma_dvt_kiem,
+          ma_kho,
           kho: r.dm_kho?.ten_kho || r.ma_kho || p.dm_kho?.ten_kho || p.ma_kho,
-          phien: '#' + (r.phien_id?.slice(-4).toUpperCase() || ''),
+          phien_id: r.phien_id,
+          ke_toan_id: p.ke_toan_id, thu_kho_id: p.thu_kho_id,
           sl_kt: null, sl_tk: null,
+          so_luong_so_sach: tonKhoRows.find(t => t.ma_vt === r.ma_vt && (t.ma_kho ?? '') === (ma_kho ?? ''))?.so_luong_so_sach ?? null,
+          phienIds: new Set([r.phien_id]),
+          _tab: 'so_sanh',
+          _key: `${r.ma_vt}__${ma_kho}__${r.phien_id}`,
         }
       }
       const sl = parseFloat(r.so_luong_quy_doi) || 0
@@ -509,11 +529,14 @@ export default function BaoCao({ currentUser }) {
       if (role === 'thu_kho') map[key].sl_tk = (map[key].sl_tk ?? 0) + sl
     })
     return Object.values(map)
-      .filter(r => {
-        if (r.sl_kt === null || r.sl_tk === null) return true
-        return Math.abs((r.sl_kt ?? 0) - (r.sl_tk ?? 0)) > 0.0001
+      .sort((a, b) => {
+        const pa = phienList.find(x => x.id === a.phien_id)
+        const pb = phienList.find(x => x.id === b.phien_id)
+        const da = pa?.ngay_kiem || '', db = pb?.ngay_kiem || ''
+        if (da !== db) return db.localeCompare(da)
+        if (a.phien_id !== b.phien_id) return (a.phien_id || '').localeCompare(b.phien_id || '')
+        return a.ma_vt.localeCompare(b.ma_vt)
       })
-      .sort((a, b) => a.ma_vt.localeCompare(b.ma_vt))
   })()
 
   // ── Sub-screen: Xem / Sửa / Xóa ──────────────────────────────────
@@ -521,16 +544,26 @@ export default function BaoCao({ currentUser }) {
     setDetailItem(row)
     setEditMode(edit)
     setForm({
+      ma_vt: row.ma_vt || '',
+      ten_vt: row.ten_vt || '',
       so_luong_thuc_te: row.so_luong_thuc_te,
       ma_dvt_kiem: row.ma_dvt_kiem || '',
       he_so_quy_doi: row.he_so_quy_doi ?? 1,
       ghi_chu: row.ghi_chu || '',
       ma_kho: row.ma_kho || '',
+      phien_id: row.phien_id || '',
     })
   }
 
   async function handleDeleteKiemKe() {
     if (!kiemKeSelected) return
+    // Chỉ được xóa dòng do chính mình nhập — dù cùng phiên, không được đụng vào dòng của
+    // người khác (VD kế toán xóa dòng của thủ kho hoặc ngược lại).
+    if (currentUser.role !== 'admin' && kiemKeSelected.nguoi_nhap_id !== currentUser.id) {
+      setConfirmXoaKiemKe(false)
+      setWarningMsg('Bạn chỉ có thể xóa dòng do chính mình nhập.')
+      return
+    }
     setSaving(true)
     await deleteChiTiet(kiemKeSelected.id)
     if (navigator.onLine) pushOfflineQueue()
@@ -547,13 +580,28 @@ export default function BaoCao({ currentUser }) {
 
   async function handleSave() {
     if (!detailItem) return
+    // Đổi phiên chỉ được chọn trong các phiên user thuộc về (xem picker), nhưng chặn thêm lần
+    // nữa ở đây phòng khi state bị can thiệp — tránh Supabase RLS chặn update (403) khi lưu.
+    if (form.phien_id && form.phien_id !== detailItem.phien_id) {
+      const p = phienList.find(p => p.id === form.phien_id)
+      const owned = p && (p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id)
+      if (!owned) {
+        setWarningMsg('Bạn không phải kế toán/thủ kho của phiên vừa chọn nên không thể chuyển sang phiên đó.')
+        return
+      }
+    }
     setSaving(true)
+    const maVtChanged = form.ma_vt && form.ma_vt !== detailItem.ma_vt
     const updated = await updateChiTiet(detailItem.id, {
+      ma_vt: form.ma_vt || detailItem.ma_vt,
+      ten_vt: form.ten_vt || detailItem.ten_vt,
       so_luong_thuc_te: parseFloat(form.so_luong_thuc_te),
       ma_dvt_kiem: form.ma_dvt_kiem,
       he_so_quy_doi: parseFloat(form.he_so_quy_doi) || 1,
       ghi_chu: form.ghi_chu,
       ma_kho: form.ma_kho || null,
+      phien_id: form.phien_id || detailItem.phien_id,
+      ...(maVtChanged ? { so_luong_so_sach: await getSoSach(form.ma_vt, form.ma_kho || detailItem.ma_kho) } : {}),
     })
     if (navigator.onLine) pushOfflineQueue()
     // Cập nhật lại dòng trong state mà không cần re-fetch
@@ -589,56 +637,92 @@ export default function BaoCao({ currentUser }) {
 
   function openMiniKiemKe(phienIds) {
     const ids = [...(phienIds || [])]
+    const ownPhienIds = phienList
+      .filter(p => p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id)
+      .map(p => p.id)
 
-    // Nếu mặt hàng chưa được kiểm (phienIds rỗng) → dùng tất cả phiên user thuộc về làm pool
-    const pool = ids.length > 0
-      ? ids
-      : phienList.filter(p => p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id).map(p => p.id)
+    // Mặt hàng đã có phiên cụ thể (ids không rỗng) → CHỈ được thao tác nếu thuộc 1 trong
+    // các phiên đó. Không fallback sang phiên khác của user — Supabase RLS sẽ chặn insert
+    // (403) nếu cố ghi vào phiên không thuộc mình, nên phải chặn ngay từ đầu, báo rõ lý do.
+    if (ids.length > 0) {
+      const mine = ids.filter(id => ownPhienIds.includes(id))
+      if (mine.length === 0) {
+        setWarningMsg('Bạn không phải kế toán/thủ kho của phiên chứa mặt hàng này nên không thể kiểm kê nhanh tại đây. Vui lòng vào đúng phiên của bạn.')
+        return
+      }
+      if (mine.length === 1) {
+        setMiniKiemKePhienId(mine[0])
+        setShowMiniKiemKe(true)
+      } else if (rememberedPhienId && mine.includes(rememberedPhienId)) {
+        setMiniKiemKePhienId(rememberedPhienId)
+        setShowMiniKiemKe(true)
+      } else {
+        setPhienPickerCandidates(mine)
+        setShowPhienPicker(true)
+      }
+      return
+    }
 
-    const mine = pool.filter(id => {
-      const p = phienList.find(p => p.id === id)
-      return p && (p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id)
-    })
-    const candidates = mine.length > 0 ? mine : pool
-
-    if (candidates.length === 0) {
-      alert('Chưa có phiên kiểm kê nào. Vui lòng tạo phiên trước.')
-    } else if (candidates.length === 1) {
-      setMiniKiemKePhienId(candidates[0])
+    // Mặt hàng chưa được kiểm (ids rỗng) → cho chọn trong các phiên của chính user
+    if (ownPhienIds.length === 0) {
+      setWarningMsg('Chưa có phiên kiểm kê nào. Vui lòng tạo phiên trước.')
+    } else if (ownPhienIds.length === 1) {
+      setMiniKiemKePhienId(ownPhienIds[0])
       setShowMiniKiemKe(true)
-    } else if (rememberedPhienId && candidates.includes(rememberedPhienId)) {
-      // Đã chọn phiên trước đó → dùng lại, không hỏi nữa
+    } else if (rememberedPhienId && ownPhienIds.includes(rememberedPhienId)) {
       setMiniKiemKePhienId(rememberedPhienId)
       setShowMiniKiemKe(true)
     } else {
-      // Nhiều phiên, chưa có lựa chọn → hiện picker 1 lần với đúng danh sách candidates
-      setPhienPickerCandidates(candidates)
+      setPhienPickerCandidates(ownPhienIds)
       setShowPhienPicker(true)
     }
   }
 
+  // Bấm "Xóa hết nhập lại" trên 1 dòng — nếu mặt hàng nằm ở nhiều phiên (thuộc user) thì hỏi
+  // chọn đúng phiên trước khi xóa; chỉ 1 phiên thì xóa thẳng, không cần hỏi.
+  function startXoaHet(row) {
+    const ids = [...(row.phienIds || [])]
+    const ownIds = ids.filter(id => {
+      const p = phienList.find(p => p.id === id)
+      return p && (p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id)
+    })
+    if (ownIds.length === 0) {
+      setWarningMsg('Bạn không phải kế toán/thủ kho của phiên chứa mặt hàng này nên không thể xóa tại đây.')
+    } else if (ownIds.length === 1) {
+      setXoaHetPhienId(ownIds[0])
+      setConfirmXoaHet(true)
+    } else {
+      setXoaHetPickerCandidates(ownIds)
+      setShowXoaHetPicker(true)
+    }
+  }
+
   async function handleXoaHet() {
-    if (!thuaThieuDetail) return
+    if (!thuaThieuDetail || !xoaHetPhienId) return
+    const { ma_vt, ma_kho } = thuaThieuDetail
+
     setXoaHetSaving(true)
-    const { ma_vt, ma_kho, phienIds } = thuaThieuDetail
-    const phienIdsArr = [...(phienIds || [])]
+    // Chỉ xóa dòng do CHÍNH user hiện tại nhập — cùng phiên nhưng khác người nhập (VD kế toán
+    // với thủ kho) thì không được đụng vào số liệu của nhau, dù cả hai đều thuộc phiên này.
     const rows = await db.chitiet
-      .where('phien_id').anyOf(phienIdsArr)
-      .filter(r => r.ma_vt === ma_vt && r.ma_kho === ma_kho)
+      .where('phien_id').equals(xoaHetPhienId)
+      .filter(r => r.ma_vt === ma_vt && r.ma_kho === ma_kho && r.nguoi_nhap_id === currentUser.id)
       .toArray()
     if (navigator.onLine) {
       await supabase.from('kiem_ke_chitiet')
         .delete()
         .eq('ma_vt', ma_vt)
         .eq('ma_kho', ma_kho)
-        .in('phien_id', phienIdsArr)
+        .eq('phien_id', xoaHetPhienId)
+        .eq('nguoi_nhap_id', currentUser.id)
       for (const r of rows) await db.chitiet.delete(r.id)
     } else {
       for (const r of rows) await deleteChiTiet(r.id)
     }
     setXoaHetSaving(false)
     setConfirmXoaHet(false)
-    openMiniKiemKe(thuaThieuDetail.phienIds)
+    openMiniKiemKe(new Set([xoaHetPhienId]))
+    setXoaHetPhienId(null)
     loadData()
   }
 
@@ -647,10 +731,22 @@ export default function BaoCao({ currentUser }) {
     const p = detailItem.phien_kiem_ke
     const isLocked = p?.xac_nhan_ke_toan || p?.xac_nhan_thu_kho
     const canEdit = !isLocked && (currentUser.role === 'admin' || detailItem.nguoi_nhap_id === currentUser.id)
+    const phienInfoFor = id => {
+      const ph = phienList.find(x => x.id === id)
+      const ma = '#' + id.slice(-4).toUpperCase()
+      if (!ph) return { label: ma, kt: '', tk: '' }
+      return {
+        label: `${ph.ngay_kiem.split('-').reverse().join('/')} · ${ma}`,
+        kt: userMap[ph.ke_toan_id]?.ho_ten || '',
+        tk: userMap[ph.thu_kho_id]?.ho_ten || '',
+      }
+    }
     return (
       <div className="screen">
         <div className="topbar">
-          <div className="topbar-title">{detailItem.ma_vt} · {detailItem.ten_vt}</div>
+          <div className="topbar-title">
+            {editMode ? (form.ma_vt ? `${form.ma_vt} · ${form.ten_vt}` : '-- Chọn vật tư --') : `${detailItem.ma_vt} · ${detailItem.ten_vt}`}
+          </div>
           <div className="topbar-sub">
             {editMode ? 'Chỉnh sửa' : 'Chi tiết'} · {detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || ''}
           </div>
@@ -660,6 +756,16 @@ export default function BaoCao({ currentUser }) {
             <div style={{ background: '#FEF3C7', color: '#92400E', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 13 }}>
               🔒 Phiên đã có xác nhận — không thể sửa/xóa
             </div>
+          )}
+
+          {editMode && (
+            <ChonVatTu
+              value={form.ma_vt ? { ma_vt: form.ma_vt, ten_vt: form.ten_vt } : null}
+              onSelect={item => setForm(f => item
+                ? { ...f, ma_vt: item.ma_vt, ten_vt: item.ten_vt, ma_dvt_kiem: item.ma_dvt_kiem || f.ma_dvt_kiem }
+                : { ...f, ma_vt: '', ten_vt: '' }
+              )}
+            />
           )}
 
           <div className="row-2col">
@@ -709,6 +815,31 @@ export default function BaoCao({ currentUser }) {
           </div>
 
           <div className="row-2col">
+            <div className="field-group" style={{ minWidth: 0 }}>
+              <label className="field-label">Phiên</label>
+              {(() => {
+                const id = editMode ? form.phien_id : detailItem.phien_id
+                const info = id ? phienInfoFor(id) : null
+                return (
+                  <div onClick={editMode ? () => { setEditPhienQ(''); setOpenEditPhienModal(true) } : undefined}
+                    style={{
+                      height: 40, padding: '0 12px', border: '1.5px solid var(--border)', borderRadius: 10,
+                      cursor: editMode ? 'pointer' : 'default',
+                      display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden'
+                    }}>
+                    <span style={{
+                      flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      fontSize: 14, fontWeight: 500, color: info ? 'var(--text)' : 'var(--text-muted)'
+                    }}>
+                      {info
+                        ? [info.label, info.kt && `KT: ${info.kt}`, info.tk && `TK: ${info.tk}`].filter(Boolean).join(' · ')
+                        : '-- Chọn phiên --'}
+                    </span>
+                    {editMode && <span style={{ fontSize: 13, color: 'var(--text-muted)', flexShrink: 0 }}>▾</span>}
+                  </div>
+                )
+              })()}
+            </div>
             <div className="field-group">
               <label className="field-label">Kho</label>
               {editMode
@@ -719,22 +850,21 @@ export default function BaoCao({ currentUser }) {
                 : <div className="input-readonly">{detailItem.dm_kho?.ten_kho || detailItem.ma_kho || p?.dm_kho?.ten_kho || p?.ma_kho || '—'}</div>
               }
             </div>
-            <div className="field-group">
-              <label className="field-label">Ghi chú</label>
-              {editMode
-                ? <input type="text" className="input-field"
-                    value={form.ghi_chu}
-                    onChange={e => setForm(f => ({ ...f, ghi_chu: e.target.value }))}
-                    placeholder="Nhập ghi chú..." />
-                : <div className="input-readonly">{detailItem.ghi_chu || '—'}</div>
-              }
-            </div>
+          </div>
+
+          <div className="field-group">
+            <label className="field-label">Ghi chú</label>
+            {editMode
+              ? <textarea className="input-field" value={form.ghi_chu}
+                  onChange={e => setForm(f => ({ ...f, ghi_chu: e.target.value }))}
+                  placeholder="Nhập ghi chú..." rows={2} style={{ resize: 'vertical', lineHeight: 1.5 }} />
+              : <div className="input-readonly">{detailItem.ghi_chu || '—'}</div>
+            }
           </div>
 
           <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
             {[
               ['Người nhập', detailItem._nguoi_nhap || '—'],
-              ['Phiên',      detailItem.phien_id ? '#' + detailItem.phien_id.slice(-4).toUpperCase() : '—'],
               ['Thời gian',  detailItem.created_at ? new Date(detailItem.created_at).toLocaleString('vi-VN') : '—'],
               ['SL sổ sách', detailItem.so_luong_so_sach != null ? fmtSL(detailItem.so_luong_so_sach) : '—'],
               ['Chênh lệch', detailItem.chenh_lech != null ? fmtSL(detailItem.chenh_lech) : '—'],
@@ -773,7 +903,7 @@ export default function BaoCao({ currentUser }) {
               {editMode ? 'Hủy' : 'Đóng'}
             </button>
             {editMode ? (
-              <button className="btn-primary" onClick={handleSave} disabled={saving}>
+              <button className="btn-primary" onClick={handleSave} disabled={saving || !form.ma_vt}>
                 {saving ? 'Đang lưu...' : 'Lưu'}
               </button>
             ) : canEdit ? (
@@ -845,6 +975,44 @@ export default function BaoCao({ currentUser }) {
                       <span style={{ background: '#E6F4EF', color: 'var(--green)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{d.ma_dvt}</span>
                       <span style={{ fontSize: 15, fontWeight: selected ? 600 : 400 }}>{d.ten_dvt}</span>
                       {selected && <span style={{ marginLeft: 'auto', color: 'var(--green)', fontSize: 18 }}>✓</span>}
+                    </div>
+                  )
+                })}
+            </div>
+          </div>
+        )}
+
+        {openEditPhienModal && (
+          <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <button onClick={() => { setOpenEditPhienModal(false); setEditPhienQ('') }}
+                  style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', padding: 0, color: 'var(--text)' }}>✕</button>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Chọn phiên</span>
+              </div>
+              <input type="text" className="input-field" placeholder="Tìm phiên..."
+                value={editPhienQ} onChange={e => setEditPhienQ(e.target.value)} autoFocus />
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {phienList
+                .filter(ph => ph.ke_toan_id === currentUser.id || ph.thu_kho_id === currentUser.id)
+                .filter(ph => !editPhienQ.trim() ||
+                  toSearchable(khoMap[ph.ma_kho] || ph.ma_kho || '').includes(toSearchable(editPhienQ)) ||
+                  toSearchable(ph.ngay_kiem).includes(toSearchable(editPhienQ)) ||
+                  toSearchable(ph.id).includes(toSearchable(editPhienQ)))
+                .map(ph => {
+                  const selected = form.phien_id === ph.id
+                  const kt = userMap[ph.ke_toan_id]?.ho_ten || '?'
+                  const tk = userMap[ph.thu_kho_id]?.ho_ten || '?'
+                  return (
+                    <div key={ph.id}
+                      onClick={() => { setForm(f => ({ ...f, phien_id: ph.id })); setOpenEditPhienModal(false); setEditPhienQ('') }}
+                      style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer', background: selected ? '#F0FDF4' : '#fff' }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{ph.ngay_kiem.split('-').reverse().join('/')} · #{ph.id.slice(-4).toUpperCase()}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {khoMap[ph.ma_kho] || ph.ma_kho || ''} · KT: {kt} · TK: {tk}
+                      </div>
+                      {selected && <span style={{ color: 'var(--green)', fontSize: 12, fontWeight: 700 }}>✓ Đang chọn</span>}
                     </div>
                   )
                 })}
@@ -946,8 +1114,9 @@ export default function BaoCao({ currentUser }) {
             const colSS = [
               { label: 'Mã VT', get: r => r.ma_vt },
               { label: 'Tên vật tư', get: r => r.ten_vt },
+              { label: 'ĐVT', get: r => dvtMap[r.ma_dvt] || r.ma_dvt || '' },
               { label: 'Kho', get: r => r.kho || '' },
-              { label: 'Phiên', get: r => r.phien },
+              { label: 'Phiên', get: r => [...(r.phienIds || [])].map(id => '#' + id.slice(-4).toUpperCase()).join(', ') },
               { label: 'SL Kế toán', get: r => r.sl_kt ?? '' },
               { label: 'SL Thủ kho', get: r => r.sl_tk ?? '' },
               { label: 'Lệch KT-TK', get: r => r.sl_kt !== null && r.sl_tk !== null ? (r.sl_kt - r.sl_tk) : '' },
@@ -964,7 +1133,7 @@ export default function BaoCao({ currentUser }) {
         })()}
         <span style={{ flex: 1 }} />
         {activeFilterCount > 0 && (
-          <button onClick={() => { setF(INIT_FILTERS); setDraft(INIT_FILTERS) }} style={{
+          <button onClick={() => { setF(getInitFilters(currentUser.role)); setDraft(getInitFilters(currentUser.role)) }} style={{
             border: 'none', background: 'none', color: 'var(--text-muted)',
             fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap'
           }}>Xóa lọc</button>
@@ -1075,7 +1244,7 @@ export default function BaoCao({ currentUser }) {
           )}
 
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button onClick={() => setDraft(INIT_FILTERS)} style={{
+            <button onClick={() => setDraft(getInitFilters(currentUser.role))} style={{
               flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid var(--border)',
               background: '#fff', color: 'var(--text)', fontWeight: 600, fontSize: 13, cursor: 'pointer'
             }}>Thiết lập lại</button>
@@ -1191,14 +1360,13 @@ export default function BaoCao({ currentUser }) {
         ) : tab === 'so_sanh' ? (
           soSanhRows.length === 0 ? (
             <div className="empty-state">
-              {data.length === 0
-                ? 'Dùng bộ lọc để chọn ngày, kho, kế toán, thủ kho cần so sánh'
-                : 'Không có lệch giữa KT và TK ✓'}
+              Dùng bộ lọc để chọn ngày, kho, kế toán, thủ kho cần so sánh
             </div>
           ) : (
             <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
               <colgroup>
                 <col />
+                <col style={{ width: 46 }} />
                 <col style={{ width: 58 }} />
                 <col style={{ width: 58 }} />
                 <col style={{ width: 62 }} />
@@ -1207,6 +1375,7 @@ export default function BaoCao({ currentUser }) {
                 <tr>
                   {[
                     { l: 'Mã / Tên VT', right: false },
+                    { l: 'ĐVT',   right: false },
                     { l: 'KT',    right: true },
                     { l: 'TK',    right: true },
                     { l: 'Lệch',  right: true },
@@ -1224,14 +1393,29 @@ export default function BaoCao({ currentUser }) {
                 {pageSoSanhRows.map((r, i) => {
                   const lech = (r.sl_kt ?? 0) - (r.sl_tk ?? 0)
                   const missing = r.sl_kt === null || r.sl_tk === null
-                  const bg = missing ? '#FFFBEB' : '#FEF2F2'
+                  const khop = !missing && lech === 0
+                  const trangThai = khop ? 'Khớp' : 'Không khớp'
+                  const trangThaiColor = khop ? '#16A34A' : '#DC2626'
+                  const bg = khop ? '#F0FDF4' : '#FEF2F2'
                   const tdStyle = { padding: '7px 6px', borderBottom: '1px solid #F3F4F6', background: bg, verticalAlign: 'middle' }
-                  return (
-                    <tr key={i}>
+                  const isSelected = thuaThieuDetail?._tab === 'so_sanh' && thuaThieuDetail._key === r._key
+                  const maPhien = '#' + (r.phien_id ? r.phien_id.slice(-4).toUpperCase() : '?')
+                  const kt = userMap[r.ke_toan_id]?.ho_ten || '?'
+                  const tk = userMap[r.thu_kho_id]?.ho_ten || '?'
+                  return <>
+                    <tr key={i} style={{ cursor: 'pointer' }}
+                      onClick={() => setThuaThieuDetail(isSelected ? null : r)}>
                       <td style={{ ...tdStyle, overflow: 'hidden' }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ma_vt}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#1d9e75', whiteSpace: 'nowrap' }}>{r.ma_vt}</span>
+                          {trangThai && <span style={{ fontSize: 10, fontWeight: 700, color: trangThaiColor, flexShrink: 0 }}>· {trangThai}</span>}
+                        </div>
                         <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ten_vt}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[r.kho, r.phien].filter(Boolean).join(' · ')}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{[r.kho, maPhien].filter(Boolean).join(' · ')}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>KT: {kt} · TK: {tk}</div>
+                      </td>
+                      <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)' }}>
+                        {dvtMap[r.ma_dvt] || r.ma_dvt || ''}
                       </td>
                       <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
                         {r.sl_kt !== null ? fmtSL(r.sl_kt) : <span style={{ color: '#F59E0B' }}>—</span>}
@@ -1239,11 +1423,31 @@ export default function BaoCao({ currentUser }) {
                       <td style={{ ...tdStyle, textAlign: 'right', fontSize: 12 }}>
                         {r.sl_tk !== null ? fmtSL(r.sl_tk) : <span style={{ color: '#F59E0B' }}>—</span>}
                       </td>
-                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13, color: missing ? '#D97706' : lech > 0 ? '#D97706' : '#DC2626' }}>
-                        {missing ? '?' : lech > 0 ? `+${fmtSL(lech)}` : fmtSL(lech)}
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13, color: trangThaiColor }}>
+                        {missing ? '?' : lech === 0 ? '—' : (lech > 0 ? '+' : '') + fmtSL(lech)}
                       </td>
                     </tr>
-                  )
+                    {isSelected && (
+                      <tr key={`a-${i}`}>
+                        <td colSpan={5} style={{ padding: '4px 8px 8px', background: '#F9FAFB', borderBottom: '2px solid var(--border)' }}>
+                          <div style={{ display: 'flex', gap: 16 }}>
+                            <span onClick={e => { e.stopPropagation(); openMiniKiemKe(r.phienIds) }}
+                              style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '2px 0' }}>
+                              + Kiểm kê
+                            </span>
+                            <span onClick={e => { e.stopPropagation(); setChiTietPage(1); setShowChiTietSS(true) }}
+                              style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 0' }}>
+                              Chi tiết
+                            </span>
+                            <span onClick={e => { e.stopPropagation(); startXoaHet(r) }}
+                              style={{ fontSize: 12, fontWeight: 600, color: '#DC2626', cursor: 'pointer', padding: '2px 0' }}>
+                              Xóa hết nhập lại
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 })}
               </tbody>
             </table>
@@ -1324,7 +1528,7 @@ export default function BaoCao({ currentUser }) {
                           {row.so_luong_so_sach != null ? fmtSL(row.so_luong_so_sach) : '—'}
                         </td>
                         <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 13, color: clColor }}>
-                          {!isNaN(cl) ? (cl > 0 ? '+' : '') + fmtSL(cl) : '—'}
+                          {isNaN(cl) || cl === 0 ? '—' : (cl > 0 ? '+' : '') + fmtSL(cl)}
                         </td>
                       </tr>
                       {isSelected && (
@@ -1335,7 +1539,11 @@ export default function BaoCao({ currentUser }) {
                                 style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer', padding: '2px 0' }}>
                                 + Kiểm kê
                               </span>
-                              <span onClick={e => { e.stopPropagation(); setConfirmXoaHet(true) }}
+                              <span onClick={e => { e.stopPropagation(); setChiTietPage(1); setShowChiTietSS(true) }}
+                                style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', padding: '2px 0' }}>
+                                Chi tiết
+                              </span>
+                              <span onClick={e => { e.stopPropagation(); startXoaHet(row) }}
                                 style={{ fontSize: 12, fontWeight: 600, color: '#DC2626', cursor: 'pointer', padding: '2px 0' }}>
                                 Xóa hết nhập lại
                               </span>
@@ -1424,8 +1632,11 @@ export default function BaoCao({ currentUser }) {
                         <div style={{ display: 'flex', gap: 16 }}>
                           <span onClick={e => { e.stopPropagation(); openDetail(row, false) }}
                             style={{ fontSize: 12, fontWeight: 600, color: '#2563EB', cursor: 'pointer' }}>Xem</span>
-                          <span onClick={e => { e.stopPropagation(); openDetail(row, true) }}
-                            style={{ fontSize: 12, fontWeight: 600, color: '#D97706', cursor: 'pointer' }}>Sửa</span>
+                          <span onClick={e => {
+                            e.stopPropagation()
+                            if (currentUser.role !== 'admin' && row.nguoi_nhap_id !== currentUser.id) setWarningMsg('Bạn chỉ có thể sửa dòng do chính mình nhập.')
+                            else openDetail(row, true)
+                          }} style={{ fontSize: 12, fontWeight: 600, color: '#D97706', cursor: 'pointer' }}>Sửa</span>
                           <span onClick={e => { e.stopPropagation(); setConfirmXoaKiemKe(true) }}
                             style={{ fontSize: 12, fontWeight: 600, color: '#DC2626', cursor: 'pointer' }}>Xóa</span>
                         </div>
@@ -1592,7 +1803,7 @@ export default function BaoCao({ currentUser }) {
 
       {/* ── Confirm xóa dòng kiểm kê ── */}
       {confirmXoaKiemKe && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '100%', maxWidth: 360 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Xóa dòng kiểm kê?</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
@@ -1609,16 +1820,60 @@ export default function BaoCao({ currentUser }) {
         </div>
       )}
 
+      {/* ── Cảnh báo (thay alert) ── */}
+      {warningMsg && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 400, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '100%', maxWidth: 360 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Không thể thao tác</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
+              {warningMsg}
+            </div>
+            <button className="btn-primary" style={{ width: '100%' }} onClick={() => setWarningMsg(null)}>Đã hiểu</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Chọn phiên trước khi xóa hết (mặt hàng nằm ở nhiều phiên) ── */}
+      {showXoaHetPicker && thuaThieuDetail && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Xóa hết — chọn phiên</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{thuaThieuDetail.ma_vt} · {thuaThieuDetail.ten_vt}</div>
+            <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>Mặt hàng này nằm ở nhiều phiên của bạn — chọn đúng phiên cần xóa.</div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {xoaHetPickerCandidates.map(id => {
+              const p = phienList.find(p => p.id === id)
+              if (!p) return null
+              const kt = userMap[p.ke_toan_id]?.ho_ten || '?'
+              const tk = userMap[p.thu_kho_id]?.ho_ten || '?'
+              return (
+                <div key={id} onClick={() => { setXoaHetPhienId(id); setShowXoaHetPicker(false); setConfirmXoaHet(true) }}
+                  style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6', cursor: 'pointer' }}>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{p.ngay_kiem} · #{id.slice(-4).toUpperCase()}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {khoMap[p.ma_kho] || p.ma_kho} · KT: {kt} · TK: {tk}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
+            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowXoaHetPicker(false)}>Hủy</button>
+          </div>
+        </div>
+      )}
+
       {/* ── Confirm xóa hết ── */}
       {confirmXoaHet && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
           <div style={{ background: '#fff', borderRadius: 12, padding: 24, width: '100%', maxWidth: 360 }}>
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>Xóa hết nhập lại?</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 20, lineHeight: 1.6 }}>
-              Xóa hết số lượng kiểm kê của mặt hàng này và nhập lại số đúng cuối cùng?
+              Xóa hết số lượng bạn đã nhập cho mặt hàng này{xoaHetPhienId ? ` ở phiên #${xoaHetPhienId.slice(-4).toUpperCase()}` : ''} và nhập lại số đúng cuối cùng? (Không ảnh hưởng số liệu của người khác trong cùng phiên)
             </div>
             <div className="row-2col">
-              <button className="btn-secondary" onClick={() => setConfirmXoaHet(false)} disabled={xoaHetSaving}>Hủy</button>
+              <button className="btn-secondary" onClick={() => { setConfirmXoaHet(false); setXoaHetPhienId(null) }} disabled={xoaHetSaving}>Hủy</button>
               <button className="btn-primary" onClick={handleXoaHet} disabled={xoaHetSaving}
                 style={{ background: '#DC2626', borderColor: '#DC2626' }}>
                 {xoaHetSaving ? 'Đang xóa...' : 'Xác nhận'}
@@ -1627,6 +1882,153 @@ export default function BaoCao({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* ── Chi tiết Thừa/Thiếu SS ── */}
+      {showChiTietSS && thuaThieuDetail && (() => {
+        const chiTietRows = displayData
+          .filter(r => r.ma_vt === thuaThieuDetail.ma_vt && (r.ma_kho ?? '') === (thuaThieuDetail.ma_kho ?? '')
+            && (!thuaThieuDetail.phienIds || thuaThieuDetail.phienIds.size === 0 || thuaThieuDetail.phienIds.has(r.phien_id)))
+          .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        const tongQuyDoi = chiTietRows.reduce((s, r) => s + (r.so_luong_quy_doi ?? 0), 0)
+        const dvtChinh = dvtMap[vtDvtChinhMap[thuaThieuDetail.ma_vt]] || vtDvtChinhMap[thuaThieuDetail.ma_vt] || ''
+        const ctTotalPages = Math.max(1, Math.ceil(chiTietRows.length / PAGE_SIZE))
+        const ctPageStart  = (chiTietPage - 1) * PAGE_SIZE
+        const ctPageRows   = chiTietRows.slice(ctPageStart, ctPageStart + PAGE_SIZE)
+        const ctBtnStyle = (disabled) => ({
+          border: '1px solid var(--border)', borderRadius: 6,
+          padding: '4px 9px', fontSize: 13, background: '#fff',
+          color: disabled ? '#CBD5E1' : 'var(--text)',
+          cursor: disabled ? 'default' : 'pointer',
+        })
+        return (
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 56, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12 }}>
+              <button onClick={() => setShowChiTietSS(false)}
+                style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', padding: 0, color: 'var(--text)' }}>✕</button>
+              <span style={{ fontWeight: 600, fontSize: 15, flex: 1 }}>Chi tiết vật tư</span>
+              {(() => {
+                const linkStyle = { border: 'none', background: 'none', fontSize: 13, cursor: 'pointer', padding: 0, whiteSpace: 'nowrap', color: 'var(--green)', fontWeight: 600 }
+                const ctFilename = `ChiTiet_${thuaThieuDetail.ma_vt}.xlsx`
+                return <>
+                  <button style={linkStyle} disabled={!chiTietRows.length} onClick={() => exportExcel(chiTietRows, colKiemKe, ctFilename)}>⬇ Excel</button>
+                  <button style={linkStyle} disabled={!chiTietRows.length} onClick={() => shareExcel(chiTietRows, colKiemKe, ctFilename)}>⬆ Chia sẻ</button>
+                </>
+              })()}
+            </div>
+            <div style={{
+              padding: '8px 10px', flexShrink: 0, background: '#F0FDF4',
+              borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <span style={{ fontSize: 12, fontWeight: 700 }}>Tổng cộng ({chiTietRows.length} dòng)</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: '#1d9e75' }}>{fmtSL(tongQuyDoi)} {dvtChinh}</span>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: '40%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '6%' }} />
+                  <col style={{ width: '6%' }} />
+                  <col style={{ width: '15%' }} />
+                  <col style={{ width: '6%' }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    {[
+                      { l: 'Mã / Tên VT', center: false },
+                      { l: 'SL thực tế',  center: true  },
+                      { l: 'ĐVT phụ',     center: true  },
+                      { l: '×HS',         center: true  },
+                      { l: 'SL quy đổi',  center: true  },
+                      { l: 'ĐVT chính',   center: true  },
+                    ].map(c => (
+                      <th key={c.l} style={{
+                        padding: '6px 4px', background: '#1D9E75', color: '#fff',
+                        fontWeight: 600, fontSize: 10, lineHeight: 1.3,
+                        textAlign: c.center ? 'center' : 'left',
+                        verticalAlign: 'middle',
+                        position: 'sticky', top: 0, zIndex: 1
+                      }}>{c.l}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {ctPageRows.length === 0 ? (
+                    <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>Không có dòng kiểm kê nào</td></tr>
+                  ) : ctPageRows.map((r, i) => {
+                    const rowBg  = (ctPageStart + i) % 2 === 0 ? '#fff' : '#F9FAFB'
+                    const dvtPhu = r.ma_dvt_kiem || ''
+                    const hs     = r.he_so_quy_doi ?? 1
+                    const tenKho   = khoMap[thuaThieuDetail.ma_kho] || thuaThieuDetail.ma_kho || ''
+                    const maPhien  = r.phien_id ? '#' + r.phien_id.slice(-4).toUpperCase() : ''
+                    const thoiGian = r.created_at ? (() => {
+                      const d = new Date(r.created_at)
+                      return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+                    })() : ''
+                    const metaSub = [maPhien, r._nguoi_nhap, thoiGian].filter(Boolean).join(' · ')
+                    const isSelectedCt = kiemKeSelected?.id === r.id
+                    const bg = isSelectedCt ? '#EFF6FF' : rowBg
+                    const td = { background: bg, verticalAlign: 'middle', padding: '8px 4px', borderBottom: isSelectedCt ? 'none' : '1px solid #F3F4F6' }
+                    return <>
+                      <tr key={r.id || i} style={{ cursor: 'pointer' }} onClick={() => setKiemKeSelected(isSelectedCt ? null : r)}>
+                        <td style={{ ...td, padding: '8px 4px 8px 10px' }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: '#1d9e75', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ma_vt}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.ten_vt}</div>
+                          {tenKho && <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>{tenKho}</div>}
+                          {metaSub && <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{metaSub}</div>}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center', fontSize: 15, fontWeight: 700 }}>
+                          {fmtSL(r.so_luong_thuc_te)}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                          {dvtPhu}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                          ×{fmtSL(hs)}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center', fontSize: 15, fontWeight: 700, color: '#1d9e75' }}>
+                          {r.so_luong_quy_doi != null ? fmtSL(r.so_luong_quy_doi) : '—'}
+                        </td>
+                        <td style={{ ...td, textAlign: 'center', fontSize: 10, color: 'var(--text-muted)' }}>
+                          {dvtChinh}
+                        </td>
+                      </tr>
+                      {isSelectedCt && (
+                        <tr key={`a-${r.id || i}`}>
+                          <td colSpan={6} style={{ padding: '4px 10px 9px', background: '#EFF6FF', borderBottom: '2px solid #BFDBFE' }}>
+                            <div style={{ display: 'flex', gap: 16 }}>
+                              <span onClick={e => {
+                                e.stopPropagation()
+                                if (currentUser.role !== 'admin' && r.nguoi_nhap_id !== currentUser.id) setWarningMsg('Bạn chỉ có thể sửa dòng do chính mình nhập.')
+                                else openDetail(r, true)
+                              }} style={{ fontSize: 12, fontWeight: 600, color: '#D97706', cursor: 'pointer' }}>Sửa</span>
+                              <span onClick={e => { e.stopPropagation(); setConfirmXoaKiemKe(true) }}
+                                style={{ fontSize: 12, fontWeight: 600, color: '#DC2626', cursor: 'pointer' }}>Xóa</span>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{
+              flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 8, padding: '8px 16px', borderTop: '1px solid var(--border)', background: '#fff',
+            }}>
+              <button onClick={() => setChiTietPage(1)} disabled={chiTietPage === 1} style={ctBtnStyle(chiTietPage === 1)}>«</button>
+              <button onClick={() => setChiTietPage(p => p - 1)} disabled={chiTietPage === 1} style={ctBtnStyle(chiTietPage === 1)}>‹</button>
+              <span style={{ fontSize: 13, fontWeight: 500, minWidth: 90, textAlign: 'center' }}>
+                Trang {chiTietPage} / {ctTotalPages}
+              </span>
+              <button onClick={() => setChiTietPage(p => p + 1)} disabled={chiTietPage === ctTotalPages} style={ctBtnStyle(chiTietPage === ctTotalPages)}>›</button>
+              <button onClick={() => setChiTietPage(ctTotalPages)} disabled={chiTietPage === ctTotalPages} style={ctBtnStyle(chiTietPage === ctTotalPages)}>»</button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* ── Phiên picker (nhiều phiên cùng user) ── */}
       {showPhienPicker && thuaThieuDetail && (
@@ -1658,7 +2060,10 @@ export default function BaoCao({ currentUser }) {
             })}
           </div>
           <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)' }}>
-            <button className="btn-secondary" style={{ width: '100%' }} onClick={() => setShowPhienPicker(false)}>Hủy</button>
+            <button className="btn-secondary" style={{ width: '100%' }}
+              onClick={() => { setShowPhienPicker(false); if (miniKiemKePhienId) setShowMiniKiemKe(true) }}>
+              Hủy
+            </button>
           </div>
         </div>
       )}
@@ -1686,7 +2091,16 @@ export default function BaoCao({ currentUser }) {
           dvtMap={dvtMap}
           onHuy={() => { setShowMiniKiemKe(false); setMiniKiemKePhienId(null); setThuaThieuDetail(null) }}
           onSaved={loadData}
-          onDoiPhien={phienPickerCandidates.length > 1 ? () => { setShowMiniKiemKe(false); setShowPhienPicker(true) } : undefined}
+          onDoiPhien={(() => {
+            // "Đổi phiên" luôn khả dụng nếu user thuộc >1 phiên — không chỉ giới hạn trong các
+            // candidates ban đầu của riêng mặt hàng đang nhập (auto-chọn 1 vẫn cho đổi sang phiên khác).
+            const ownIds = phienList
+              .filter(p => p.ke_toan_id === currentUser.id || p.thu_kho_id === currentUser.id)
+              .map(p => p.id)
+            return ownIds.length > 1
+              ? () => { setPhienPickerCandidates(ownIds); setShowMiniKiemKe(false); setShowPhienPicker(true) }
+              : undefined
+          })()}
         />
       )}
 

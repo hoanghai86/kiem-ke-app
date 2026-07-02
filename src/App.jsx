@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { supabase } from './lib/supabase'
 import { db, clearSyncQueue, dbReady } from './lib/db'
 import { pullDanhMuc, pushOfflineQueue, subscribeVatTuRealtime } from './lib/sync'
+import { suppressAuthEvents, isAuthEventsSuppressed } from './lib/authGuard'
 import BatDauPhien from './screens/BatDauPhien'
 import KiemKe from './screens/KiemKe'
 import DemLai from './screens/DemLai'
@@ -33,8 +34,11 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const unsubVatTu = useRef(null)
 
-  // Đăng xuất chủ động: xóa lastUserId rồi mới signOut
+  // Đăng xuất chủ động: xóa lastUserId rồi mới signOut. Chặn hẳn sự kiện auth cho tới khi user
+  // chủ động đăng nhập lại (xem lib/authGuard.js) — không dùng hẹn giờ vì mạng chậm có thể khiến
+  // sự kiện "trễ" đến sau cả hẹn giờ, vẫn đăng nhập nhầm lại tài khoản cũ.
   const handleLogout = useCallback(async () => {
+    suppressAuthEvents()
     localStorage.removeItem('lastUserId')
     setUser(null)
     unsubVatTu.current?.()
@@ -71,6 +75,7 @@ export default function App() {
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (isAuthEventsSuppressed()) return
       await dbReady
       if (session) {
         const profile = await resolveProfile(session.user.id)
@@ -83,7 +88,9 @@ export default function App() {
           return
         }
         if (profile) localStorage.setItem('lastUserId', profile.id)
-        setUser(profile)
+        // Chỉ cấp quyền vào app (setUser) SAU KHI đồng bộ xong — nếu set sớm thì màn hình
+        // "Đang tải danh mục..." ở Login.jsx vô nghĩa, vì route đổi ngay, Login.jsx unmount
+        // trước khi kịp tự chờ xong đồng bộ của chính nó.
         if (navigator.onLine) {
           await pullDanhMuc()
           await pushOfflineQueue()
@@ -91,12 +98,12 @@ export default function App() {
           const fresh = await db.dm_user.get(session.user.id)
           if (fresh?.active === false) {
             localStorage.removeItem('lastUserId')
-            setUser(null)
             unsubVatTu.current?.()
             await supabase.auth.signOut()
             return
           }
         }
+        setUser(profile)
         unsubVatTu.current = subscribeVatTuRealtime()
       } else if (navigator.onLine) {
         // Chỉ đăng xuất khi có mạng — offline thường là token hết hạn tạm, không phải logout thật

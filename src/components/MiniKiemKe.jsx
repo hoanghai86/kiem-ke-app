@@ -104,7 +104,10 @@ export default function MiniKiemKe({
       nguoi_nhap_id: currentUser.id,
       ngoai_so_sach: false,
     })
-    if (navigator.onLine) pushOfflineQueue()
+    if (navigator.onLine) {
+      const result = await pushOfflineQueue()
+      if (result?.errors > 0) alert('Lưu cục bộ thành công nhưng đồng bộ lên Supabase bị lỗi (có thể bạn không thuộc kế toán/thủ kho của phiên này). Xem console để biết chi tiết.')
+    }
     onSaved?.()
     setSoLuong('')
     setGhiChu('')
@@ -121,20 +124,9 @@ export default function MiniKiemKe({
   const lech      = tongKiem !== null && soSach !== null ? tongKiem - soSach : null
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 300, background: '#fff', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto' }}>
       <div className="topbar">
         <div className="topbar-title">{vt.ma_vt} · {vt.ten_vt}</div>
-        <div onClick={onDoiPhien || undefined} style={{ marginTop: 2, cursor: onDoiPhien ? 'pointer' : 'default', display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.9)', fontWeight: 600, textDecoration: onDoiPhien ? 'underline' : 'none', textUnderlineOffset: 3 }}>
-            {phienInfo?.label || 'Nhập kiểm kê'}
-          </span>
-          {phienInfo && (phienInfo.kt || phienInfo.tk) && (
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)' }}>
-              {[phienInfo.kt && `KT: ${phienInfo.kt}`, phienInfo.tk && `TK: ${phienInfo.tk}`].filter(Boolean).join(' · ')}
-            </span>
-          )}
-          {onDoiPhien && <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)' }}>▾</span>}
-        </div>
       </div>
 
       <div className="content" style={{ paddingBottom: 100 }}>
@@ -214,6 +206,29 @@ export default function MiniKiemKe({
                 )}
               </div>
             ) : <div style={{ height: 40, display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontSize: 12 }}>—</div>}
+          </div>
+        </div>
+
+        {/* Phiên */}
+        <div className="field-group">
+          <label className="field-label">Phiên</label>
+          <div onClick={onDoiPhien || undefined}
+            style={{
+              padding: '10px 12px', border: '1.5px solid var(--border)', borderRadius: 10,
+              cursor: onDoiPhien ? 'pointer' : 'default',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8
+            }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', textDecoration: onDoiPhien ? 'underline' : 'none', textUnderlineOffset: 3 }}>
+                {phienInfo?.label || 'Nhập kiểm kê'}
+              </div>
+              {phienInfo && (phienInfo.kt || phienInfo.tk) && (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  {[phienInfo.kt && `KT: ${phienInfo.kt}`, phienInfo.tk && `TK: ${phienInfo.tk}`].filter(Boolean).join(' · ')}
+                </div>
+              )}
+            </div>
+            {onDoiPhien && <span style={{ fontSize: 13, color: 'var(--text-muted)', flexShrink: 0 }}>▾</span>}
           </div>
         </div>
 

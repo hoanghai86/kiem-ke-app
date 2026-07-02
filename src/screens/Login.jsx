@@ -3,11 +3,14 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { db } from '../lib/db'
 import { pullDanhMuc } from '../lib/sync'
+import { allowAuthEvents, isAuthEventsSuppressed } from '../lib/authGuard'
 
 export default function Login({ onLogin }) {
   const [maUser, setMaUser]     = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
+  const [loadingStage, setLoadingStage] = useState('') // '' | 'login' | 'sync' — hiện rõ đang làm gì để tránh cảm giác treo máy
+  const [syncProgress, setSyncProgress] = useState(0) // 0-100, % vật tư đã tải — vẽ thanh loading kiểu game
   const [error, setError]       = useState('')
   const [foundUser, setFoundUser] = useState(null)
 
@@ -19,7 +22,9 @@ export default function Login({ onLogin }) {
 
   async function handleLogin() {
     if (!maUser.trim() || !password) return
+    allowAuthEvents() // user chủ động đăng nhập lại — bỏ chặn sự kiện auth đã đặt lúc đăng xuất
     setLoading(true)
+    setLoadingStage('login')
     setError('')
 
     // Bước 1: tìm email ứng với ma_user
@@ -32,6 +37,7 @@ export default function Login({ onLogin }) {
       if (rpcErr || !data) {
         setError('Mã user không tồn tại hoặc tài khoản đã bị khóa')
         setLoading(false)
+        setLoadingStage('')
         return
       }
       email = data
@@ -42,6 +48,7 @@ export default function Login({ onLogin }) {
       if (!found?.email) {
         setError('Không tìm thấy mã user. Cần kết nối mạng để đăng nhập lần đầu.')
         setLoading(false)
+        setLoadingStage('')
         return
       }
       email = found.email
@@ -56,6 +63,7 @@ export default function Login({ onLogin }) {
     if (authError) {
       setError('Mật khẩu không đúng')
       setLoading(false)
+      setLoadingStage('')
       return
     }
 
@@ -69,15 +77,29 @@ export default function Login({ onLogin }) {
     if (!profile) {
       setError('Tài khoản chưa được cấu hình. Liên hệ admin.')
       setLoading(false)
+      setLoadingStage('')
       return
     }
 
     await db.dm_user.put(profile)
     localStorage.setItem('lastUserId', profile.id)
-    if (navigator.onLine) await pullDanhMuc()
+    if (navigator.onLine) {
+      setLoadingStage('sync')
+      setSyncProgress(0)
+      await pullDanhMuc((loaded, total) => setSyncProgress(total ? Math.round((loaded / total) * 100) : 0))
+    }
+
+    // Nếu user đã bấm đăng xuất trong lúc hàm này còn đang chạy dở (component Login đã unmount
+    // nhưng promise vẫn tiếp tục tới đây) — không set lại user bằng profile cũ nữa.
+    if (isAuthEventsSuppressed()) {
+      setLoading(false)
+      setLoadingStage('')
+      return
+    }
 
     onLogin(profile)
     setLoading(false)
+    setLoadingStage('')
   }
 
   return (
@@ -129,8 +151,22 @@ export default function Login({ onLogin }) {
           onClick={handleLogin}
           disabled={loading || !maUser.trim() || !password}
         >
-          {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
+          {loadingStage === 'sync' ? `Đang tải danh mục... ${syncProgress}%` : loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
         </button>
+        {loadingStage === 'sync' && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ width: '100%', height: 10, background: '#E5E7EB', borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{
+                width: `${syncProgress}%`, height: '100%',
+                background: 'linear-gradient(90deg, #1d9e75, #34d399)',
+                borderRadius: 999, transition: 'width 0.25s ease-out'
+              }} />
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
+              Đang tải dữ liệu vật tư, kho... để dùng được offline
+            </div>
+          </div>
+        )}
 
         <div className="login-footer">
           Quên mật khẩu? Liên hệ admin
